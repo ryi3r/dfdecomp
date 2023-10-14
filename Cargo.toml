@@ -1,0 +1,21 @@
+[package]
+name = "dfdecomp"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ctor = "0.2.4"
+dll-syringe = { git = "https://github.com/OpenByteDev/dll-syringe", rev = "c41bc09", features = ["payload-utils"] }
+#integer-hasher = "0.1.1"
+parking_lot = "0.12.1"
+#proc_mem = "0.1.4"
+byteorder = "1.5.0"
+tracing-subscriber = "0.3.17"
+tracing = "0.1.37"
+color-eyre = "0.6.2"
+
+[lib]
+crate_type = ["cdylib"]
+name = "libdfdecomp"
