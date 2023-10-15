@@ -1,7 +1,7 @@
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(strict_provenance)]
 
-use std::{net::TcpStream, io::{Cursor, Seek, SeekFrom, BufWriter, Write}, collections::HashMap, fs::File};
+use std::{net::TcpStream, io::{Cursor, Seek, SeekFrom, BufWriter, Write}, collections::HashMap, fs::File, slice};
 use byteorder::{LittleEndian, ReadBytesExt};
 use tracing::{info, error, warn};
 
@@ -48,7 +48,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
         let data_pointer = *(0x47a4d1 as *mut u32) as *mut u32;
         let data_length = *data_pointer.offset(1) as usize;
-        let mut data = Cursor::new(Vec::from_raw_parts(data_pointer.addr() as *mut u8, data_length, data_length));
+        let mut data = Cursor::new(slice::from_raw_parts(data_pointer.addr() as *mut u8, data_length));
 
         macro_rules! read_string {
             () => {
@@ -1391,9 +1391,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
                 for ptr in tpag_ptr {
                     data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                    let mut entry = RoomData {
-                        ..Default::default()
-                    };
                 }
 
                 //info!("{:?}", tpag);
