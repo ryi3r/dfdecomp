@@ -1,7 +1,7 @@
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(strict_provenance)]
 
-use std::{net::TcpStream, io::{Cursor, Seek, SeekFrom}, collections::HashMap};
+use std::{net::TcpStream, io::{Cursor, Seek, SeekFrom, BufWriter, Write}, collections::HashMap, fs::File};
 use byteorder::{LittleEndian, ReadBytesExt};
 use tracing::{info, error, warn};
 
@@ -17,8 +17,11 @@ fn ctor() {
         info!("Hello from the DLL (Injected on DF)!!");
 
         std::thread::sleep(std::time::Duration::from_secs_f64(0.5));
-        if let Err(e) = unsafe { do_fallible_stuff() } {
-            error!("Error: {:?}", e);
+        let result = std::thread::spawn(|| {
+            unsafe { do_fallible_stuff() }
+        }).join();
+        if let Err(e) = result {
+            error!("Error: {:?}", e.downcast_ref::<String>().unwrap());
         }
     });
 }
@@ -609,797 +612,950 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let mut objt = ObjtChunk { ..Default::default() };
         let mut room = RoomChunk { ..Default::default() };
 
-        // Start reading the data...
-
-        /*let mut file = BufWriter::new(File::create("dump").unwrap());
-        file.write_all(&data.clone().into_inner()).unwrap();
-        file.flush().unwrap();
-        drop(file);*/
-
-        // FORM Chunk
+        // Unserializer
 
         {
-            data.seek(SeekFrom::Current(4)).unwrap(); // Ignore chunk name
-            form.size = data.read_u32::<LittleEndian>().unwrap();
-        }
+            info!("Start unserializing...");
+            // Start reading the data...
 
-        info!("Offset: {}", data.position());
-        // GEN8 Chunk
+            /*let mut file = BufWriter::new(File::create("dump").unwrap());
+            file.write_all(&data.clone().into_inner()).unwrap();
+            file.flush().unwrap();
+            drop(file);*/
 
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            gen8.is_debugged_disabled = read_u8!() != 0;
-            gen8.bytecode_version = read_u8!();
-            if gen8.bytecode_version != 16 {
-                info!("Warning: Expected Bytecode 16, found Bytecode {}", gen8.bytecode_version);
-            }
-            gen8.unknown = read_u16!();
-            gen8.filename = read_string!();
-            gen8.config = read_string!();
-            gen8.last_obj = read_u32!();
-            gen8.last_tile = read_u32!();
-            gen8.game_id = read_u32!();
-            gen8.guid_data = read_bytes!(16);
-            gen8.name = read_string!();
-            gen8.major = read_u32!();
-            gen8.minor = read_u32!();
-            gen8.release = read_u32!();
-            gen8.build = read_u32!();
-            gen8.default_window_width = read_u32!();
-            gen8.default_window_height = read_u32!();
-            gen8.info = read_u32!();
-            gen8.license_crc32 = read_u32!();
-            gen8.license_md5 = read_bytes!(16);
-            gen8.timestamp = read_u64!();
-            gen8.display_name = read_string!();
-            gen8.active_targets = read_u64!();
-            gen8.function_classifications = read_u64!();
-            gen8.steam_app_id = read_u32!();
-            gen8.debugger_port = read_u32!();
-            gen8.room_order.resize(read_u32!() as usize, 0);
-            for i in 0..gen8.room_order.len() {
-                gen8.room_order[i] = read_u32!();
+            // FORM Chunk
+
+            {
+                data.seek(SeekFrom::Current(4)).unwrap(); // Ignore chunk name
+                form.size = data.read_u32::<LittleEndian>().unwrap();
             }
 
-            //info!("{:?}", gen8);
-            info!("GEN8 OK!");
-        }
+            info!("Offset: {}", data.position());
+            // GEN8 Chunk
 
-        info!("Offset: {}", data.position());
-        // OPTN Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            optn.unknown1 = read_u32!();
-            optn.unknown2 = read_u32!();
-            optn.info = read_u64!();
-            optn.scale = read_i32!();
-            optn.window_color = read_u32!();
-            optn.color_depth = read_u32!();
-            optn.resolution = read_u32!();
-            optn.frequency = read_u32!();
-            optn.vertex_sync = read_u32!();
-            optn.priority = read_u32!();
-            optn.back_image = read_u32!();
-            optn.front_image = read_u32!();
-            optn.load_image = read_u32!();
-            optn.load_alpha = read_u32!();
-            for _ in 0..read_u32!() {
-                let name = read_string!();
-                let value = read_string!();
-                optn.constants.insert(name, value);
-            }
-
-            //info!("{:?}", optn);
-            info!("OPTN OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // LANG Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            lang.unknown1 = read_u32!();
-            lang.language_count = read_u32!();
-            lang.entry_count = read_u32!(); // Very vague implementation... should work as it's unused.
-
-            //info!("{:?}", lang);
-            info!("LANG OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // EXTN Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut extn_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                extn_ptr.push(read_u32!());
-            }
-            for ptr in &extn_ptr {
-                data.seek(SeekFrom::Start(*ptr as u64)).unwrap();
-                let mut entry = ExtnData {
-                    ..Default::default()
-                };
-
-                entry.empty_string = read_string!();
-                entry.extension_name = read_string!();
-                entry.class_name = read_string!();
-
-                let mut file_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    file_ptrs.push(read_u32!());
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                gen8.is_debugged_disabled = read_u8!() != 0;
+                gen8.bytecode_version = read_u8!();
+                if gen8.bytecode_version != 16 {
+                    info!("Warning: Expected Bytecode 16, found Bytecode {}", gen8.bytecode_version);
+                }
+                gen8.unknown = read_u16!();
+                gen8.filename = read_string!();
+                gen8.config = read_string!();
+                gen8.last_obj = read_u32!();
+                gen8.last_tile = read_u32!();
+                gen8.game_id = read_u32!();
+                gen8.guid_data = read_bytes!(16);
+                gen8.name = read_string!();
+                gen8.major = read_u32!();
+                gen8.minor = read_u32!();
+                gen8.release = read_u32!();
+                gen8.build = read_u32!();
+                gen8.default_window_width = read_u32!();
+                gen8.default_window_height = read_u32!();
+                gen8.info = read_u32!();
+                gen8.license_crc32 = read_u32!();
+                gen8.license_md5 = read_bytes!(16);
+                gen8.timestamp = read_u64!();
+                gen8.display_name = read_string!();
+                gen8.active_targets = read_u64!();
+                gen8.function_classifications = read_u64!();
+                gen8.steam_app_id = read_u32!();
+                gen8.debugger_port = read_u32!();
+                gen8.room_order.resize(read_u32!() as usize, 0);
+                for i in 0..gen8.room_order.len() {
+                    gen8.room_order[i] = read_u32!();
                 }
 
-                for file_ptr in file_ptrs {
-                    data.seek(SeekFrom::Start(file_ptr as u64)).unwrap();
-                    let mut file_entry = ExtnIncl {
+                //info!("{:?}", gen8);
+                info!("GEN8 OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // OPTN Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                optn.unknown1 = read_u32!();
+                optn.unknown2 = read_u32!();
+                optn.info = read_u64!();
+                optn.scale = read_i32!();
+                optn.window_color = read_u32!();
+                optn.color_depth = read_u32!();
+                optn.resolution = read_u32!();
+                optn.frequency = read_u32!();
+                optn.vertex_sync = read_u32!();
+                optn.priority = read_u32!();
+                optn.back_image = read_u32!();
+                optn.front_image = read_u32!();
+                optn.load_image = read_u32!();
+                optn.load_alpha = read_u32!();
+                for _ in 0..read_u32!() {
+                    let name = read_string!();
+                    let value = read_string!();
+                    optn.constants.insert(name, value);
+                }
+
+                //info!("{:?}", optn);
+                info!("OPTN OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // LANG Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                lang.unknown1 = read_u32!();
+                lang.language_count = read_u32!();
+                lang.entry_count = read_u32!(); // Very vague implementation... should work as it's unused.
+
+                //info!("{:?}", lang);
+                info!("LANG OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // EXTN Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut extn_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    extn_ptr.push(read_u32!());
+                }
+                for ptr in &extn_ptr {
+                    data.seek(SeekFrom::Start(*ptr as u64)).unwrap();
+                    let mut entry = ExtnData {
                         ..Default::default()
                     };
 
-                    file_entry.filename = read_string!();
-                    file_entry.end_function = read_string!();
-                    file_entry.start_function = read_string!();
-                    file_entry.file_kind = read_i32!();
+                    entry.empty_string = read_string!();
+                    entry.extension_name = read_string!();
+                    entry.class_name = read_string!();
 
-                    let mut func_ptrs = Vec::new();
+                    let mut file_ptrs = Vec::new();
                     for _ in 0..read_u32!() {
-                        func_ptrs.push(read_u32!());
+                        file_ptrs.push(read_u32!());
                     }
 
-                    for func_ptr in func_ptrs {
-                        data.seek(SeekFrom::Start(func_ptr as u64)).unwrap();
-                        let mut func_entry = ExtnFunc {
+                    for file_ptr in file_ptrs {
+                        data.seek(SeekFrom::Start(file_ptr as u64)).unwrap();
+                        let mut file_entry = ExtnIncl {
                             ..Default::default()
                         };
 
-                        func_entry.name = read_string!();
-                        func_entry.id = read_u32!();
-                        func_entry.function_kind = read_u32!();
-                        func_entry.return_kind = read_u32!();
-                        func_entry.external_name = read_string!();
+                        file_entry.filename = read_string!();
+                        file_entry.end_function = read_string!();
+                        file_entry.start_function = read_string!();
+                        file_entry.file_kind = read_i32!();
+
+                        let mut func_ptrs = Vec::new();
                         for _ in 0..read_u32!() {
-                            func_entry.arguments.push(read_u32!());
+                            func_ptrs.push(read_u32!());
                         }
 
-                        file_entry.file_functions.push(func_entry);
-                    }
-
-                    entry.extension_includes.push(file_entry);
-                }
-
-                extn.data.push(entry);
-            }
-
-            for _ in 0..extn_ptr.len() {
-                extn.product_id_data.push(read_bytes!(16));
-            }
-
-            //info!("{:?}", extn);
-            info!("EXTN OK!");
-        }
-        
-        info!("Offset: {}", data.position());
-        // SOND Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut sond_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                sond_ptr.push(read_u32!());
-            }
-            for ptr in sond_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = SondData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.flags = read_u32!();
-                entry.kind = read_string!();
-                entry.file = read_string!();
-                entry.effects = read_u32!();
-                entry.volume = read_f32!();
-                entry.pitch = read_f32!();
-                entry.group_id = read_u32!();
-                entry.audio_id = read_u32!();
-
-                sond.data.push(entry);
-            }
-
-            //info!("{:?}", sond);
-            info!("SOND OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // ARGP Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut argp_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                argp_ptr.push(read_u32!());
-            }
-
-            for ptr in argp_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                argp.names.push(read_string!());
-            }
-
-            //info!("{:?}", argp);
-            info!("ARGP OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // SPRT Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut sprt_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                sprt_ptr.push(read_u32!());
-            }
-
-            for (index, ptr) in sprt_ptr.iter().enumerate() {
-                data.seek(SeekFrom::Start(*ptr as u64)).unwrap();
-                let mut entry = SprtData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.height = read_u32!();
-                entry.origin_x = read_i32!();
-                entry.margin_left = read_i32!();
-                entry.margin_right = read_i32!();
-                entry.margin_bottom = read_i32!();
-                entry.width = read_u32!();
-                entry.transparent = read_bool!();
-                entry.smooth = read_bool!();
-                entry.preload = read_bool!();
-                entry.bbox_mode = read_u32!();
-                entry.sep_masks = read_u32!();
-                entry.margin_top = read_i32!();
-                entry.origin_y = read_i32!();
-                for _ in 0..read_u32!() {
-                    entry.textures.push(read_u32!());
-                }
-                
-                entry.mask_size = read_u32!();
-
-                for _ in 0..entry.mask_size {
-                    entry.mask_data.push(read_bytes_vec!(((entry.width + 7) / 8 * entry.height) as usize));
-                }
-                if index + 1 < sprt_ptr.len() {
-                    let nptr = sprt_ptr[index + 1];
-                    let size = (data.position() as i64 - nptr as i64).unsigned_abs() as usize;
-                    if size > 0 {
-                        entry.mask_data.push(read_bytes_vec!(size));
-                    }
-                }
-                sprt.data.push(entry);
-            }
-
-            //info!("{:?}", sprt);
-            info!("SPRT OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // BGND Chunk
-        
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut bgnd_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                bgnd_ptr.push(read_u32!());
-            }
-
-            for ptr in bgnd_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = BgndData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.transparent = read_bool!();
-                entry.smooth = read_bool!();
-                entry.preload = read_bool!();
-                entry.texture = read_u32!();
-
-                bgnd.data.push(entry);
-            }
-
-            //info!("{:?}", bgnd);
-            info!("BGND OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // PATH Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut path_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                path_ptr.push(read_u32!());
-            }
-
-            for ptr in path_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = PathData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.smooth = read_bool!();
-                entry.closed = read_bool!();
-                entry.precision = read_u32!();
-                for _ in 0..read_u32!() {
-                    let mut point = PathPoint {
-                        ..Default::default()
-                    };
-
-                    point.x = read_f32!();
-                    point.y = read_f32!();
-                    point.speed = read_f32!();
-
-                    entry.points.push(point);
-                }
-
-                path.data.push(entry);
-            }
-
-            //info!("{:?}", path);
-            info!("PATH OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // SCPT Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut scpt_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                scpt_ptr.push(read_u32!());
-            }
-
-            for ptr in scpt_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = ScptData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.id = read_u32!();
-
-                scpt.data.push(entry);
-            }
-        }
-
-        info!("Offset: {}", data.position());
-        // GLOB Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            for _ in 0..read_u32!() {
-                glob.items.push(read_u32!());
-            }
-
-            //info!("{:?}", glob);
-            info!("GLOB OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // SHDR Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut shdr_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                shdr_ptr.push(read_u32!());
-            }
-
-            for ptr in shdr_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = ShdrData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.kind = read_u32!();
-                entry.glsl_es_vertex = read_string!();
-                entry.glsl_es_fragment = read_string!();
-                entry.glsl_vertex = read_string!();
-                entry.glsl_fragment = read_string!();
-                entry.hlsl9_vertex = read_string!();
-                entry.hlsl9_fragment = read_string!();
-                entry.hlsl11_vertex_data = read_u32!();
-                entry.hlsl11_pixel_data = read_u32!();
-                for _ in 0..read_u32!() {
-                    entry.vertex_shader_attributes.push(read_string!());
-                }
-                entry.version = read_u32!();
-                entry.pssl_vertex_data = read_u32!();
-                entry.pssl_pixel_data = read_u32!();
-                entry.cg_psvita_vertex_data = read_u32!();
-                entry.cg_psvita_pixel_data = read_u32!();
-                entry.cg_ps3_vertex_data = read_u32!();
-                entry.cg_ps3_pixel_data = read_u32!();
-                entry.padding = read_bytes!(24);
-
-                shdr.data.push(entry);
-            }
-
-            //info!("{:?}", shdr);
-            info!("SHDR OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // FONT Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut font_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                font_ptr.push(read_u32!());
-            }
-
-            for ptr in font_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = FontData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.display_name = read_string!();
-                entry.em_size = read_u32!();
-                entry.bold = read_bool!();
-                entry.italic = read_bool!();
-                entry.range_start = read_u16!();
-                entry.charset = read_u8!();
-                entry.antialiasing = read_u8!();
-                entry.range_end = read_u16!();
-                entry.unknown1 = read_u16!();
-                entry.texture = read_u32!();
-                entry.scale_x = read_f32!();
-                entry.scale_y = read_f32!();
-                
-                let mut glyph_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    glyph_ptrs.push(read_u32!());
-                }
-
-                for glyph_ptr in glyph_ptrs {
-                    data.seek(SeekFrom::Start(glyph_ptr as u64)).unwrap();
-                    let mut glyph = FontGlyph {
-                        ..Default::default()
-                    };
-
-                    glyph.character = read_u16!();
-                    glyph.source_x = read_u16!();
-                    glyph.source_y = read_u16!();
-                    glyph.source_width = read_u16!();
-                    glyph.source_height = read_u16!();
-                    glyph.shift = read_i16!();
-                    glyph.offset = read_i16!();
-
-                    if read_u16!() != 0 {
-                        warn!("Glyph has Kerning!!! Offset: {}", data.position());
-                    }
-
-                    entry.glyph.push(glyph);
-                }
-
-                font.data.push(entry);
-            }
-
-            font.buffer = read_bytes_vec!(512);
-
-            //info!("{:?}", font);
-            info!("FONT OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // TMLN Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let timeline_amount = read_u32!();
-
-            if timeline_amount > 0 {
-                error!("There's {} timelines, while expecting 0 timelines.", timeline_amount);
-                return Ok(());
-            }
-        }
-
-        info!("Offset: {}", data.position());
-        // OBJT Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut objt_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                objt_ptr.push(read_u32!());
-            }
-            for ptr in objt_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = ObjtData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.sprite = read_i32!();
-                entry.visible = read_bool!();
-                entry.solid = read_bool!();
-                entry.depth = read_i32!();
-                entry.persistent = read_bool!();
-                entry.parent = read_i32!();
-                entry.texture_mask_id = read_i32!();
-                entry.uses_physics = read_bool!();
-                entry.is_sensor = read_bool!();
-                entry.collision_shape = read_u32!();
-                entry.density = read_f32!();
-                entry.restitution = read_f32!();
-                entry.group = read_u32!();
-                entry.linear_dampling = read_f32!();
-                entry.angular_dampling = read_f32!();
-                let physics_shape_vertex_count = read_u32!();
-                entry.friction = read_f32!();
-                entry.awake = read_bool!();
-                entry.kinematic = read_bool!();
-                for _ in 0..physics_shape_vertex_count {
-                    let mut vertex = ObjtPhysicsVertex {
-                        ..Default::default()
-                    };
-                    vertex.x = read_f32!();
-                    vertex.y = read_f32!();
-
-                    entry.physics_shape_vertices.push(vertex);
-                }
-                let mut event_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    event_ptrs.push(read_u32!());
-                }
-
-                for event_ptr in event_ptrs {
-                    data.seek(SeekFrom::Start(event_ptr as u64)).unwrap();
-                    let mut subevent_ptrs = Vec::new();
-                    for _ in 0..read_u32!() {
-                        subevent_ptrs.push(read_u32!());
-                    }
-
-                    let mut events = Vec::new();
-
-                    for subevent_ptr in subevent_ptrs {
-                        data.seek(SeekFrom::Start(subevent_ptr as u64)).unwrap();
-                        let mut event = ObjtEvent {
-                            ..Default::default()
-                        };
-
-                        event.event_subtype = read_u32!();
-                        let mut action_ptrs = Vec::new();
-                        for _ in 0..read_u32!() {
-                            action_ptrs.push(read_u32!());
-                        }
-
-                        for action_ptr in action_ptrs {
-                            data.seek(SeekFrom::Start(action_ptr as u64)).unwrap();
-                            let mut action = ObjtEventAction {
+                        for func_ptr in func_ptrs {
+                            data.seek(SeekFrom::Start(func_ptr as u64)).unwrap();
+                            let mut func_entry = ExtnFunc {
                                 ..Default::default()
                             };
 
-                            action.lib_id = read_u32!();
-                            action.id = read_u32!();
-                            action.kind = read_u32!();
-                            action.use_relative = read_bool!();
-                            action.is_question = read_bool!();
-                            action.use_apply_to = read_bool!();
-                            action.exe_type = read_u32!();
-                            action.action_name = read_string!();
-                            action.code_id = read_u32!();
-                            action.argument_count = read_u32!();
-                            action.who = read_i32!();
-                            action.relative = read_bool!();
-                            action.is_not = read_bool!();
-                            action.unknown1 = read_u32!();
+                            func_entry.name = read_string!();
+                            func_entry.id = read_u32!();
+                            func_entry.function_kind = read_u32!();
+                            func_entry.return_kind = read_u32!();
+                            func_entry.external_name = read_string!();
+                            for _ in 0..read_u32!() {
+                                func_entry.arguments.push(read_u32!());
+                            }
 
-                            event.event_action.push(action);
+                            file_entry.file_functions.push(func_entry);
                         }
 
-                        events.push(event);
+                        entry.extension_includes.push(file_entry);
                     }
 
-                    entry.events.push(events);
+                    extn.data.push(entry);
                 }
 
-                objt.data.push(entry);
+                for _ in 0..extn_ptr.len() {
+                    extn.product_id_data.push(read_bytes!(16));
+                }
+
+                //info!("{:?}", extn);
+                info!("EXTN OK!");
             }
+            
+            info!("Offset: {}", data.position());
+            // SOND Chunk
 
-            //info!("{:?}", objt);
-            info!("OBJT OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // ROOM Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut room_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                room_ptr.push(read_u32!());
-            }
-            for ptr in room_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = RoomData {
-                    ..Default::default()
-                };
-
-                entry.name = read_string!();
-                entry.caption = read_string!();
-                entry.width = read_u32!();
-                entry.height = read_u32!();
-                entry.speed = read_u32!();
-                entry.persistent = read_bool!();
-                entry.background_color = read_u32!();
-                entry.draw_background_color = read_bool!();
-                entry.creation_code_id = read_u32!();
-                entry.flags = read_u32!();
-                let background_ptr = read_u32!();
-                let view_ptr = read_u32!();
-                let objects_ptr = read_u32!();
-                let tiles_ptr = read_u32!();
-                entry.world = read_bool!();
-                entry.top = read_u32!();
-                entry.left = read_u32!();
-                entry.right = read_u32!();
-                entry.bottom = read_u32!();
-                entry.gravity_x = read_f32!();
-                entry.gravity_y = read_f32!();
-                entry.meters_per_pixel = read_f32!();
-
-                data.seek(SeekFrom::Start(background_ptr as u64)).unwrap();
-                let mut background_ptrs = Vec::new();
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut sond_ptr = Vec::new();
                 for _ in 0..read_u32!() {
-                    background_ptrs.push(read_u32!());
+                    sond_ptr.push(read_u32!());
                 }
-                for background_ptr in background_ptrs {
+                for ptr in sond_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = SondData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.flags = read_u32!();
+                    entry.kind = read_string!();
+                    entry.file = read_string!();
+                    entry.effects = read_u32!();
+                    entry.volume = read_f32!();
+                    entry.pitch = read_f32!();
+                    entry.group_id = read_u32!();
+                    entry.audio_id = read_u32!();
+
+                    sond.data.push(entry);
+                }
+
+                //info!("{:?}", sond);
+                info!("SOND OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // ARGP Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut argp_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    argp_ptr.push(read_u32!());
+                }
+
+                for ptr in argp_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    argp.names.push(read_string!());
+                }
+
+                //info!("{:?}", argp);
+                info!("ARGP OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // SPRT Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut sprt_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    sprt_ptr.push(read_u32!());
+                }
+
+                for (index, ptr) in sprt_ptr.iter().enumerate() {
+                    data.seek(SeekFrom::Start(*ptr as u64)).unwrap();
+                    let mut entry = SprtData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.height = read_u32!();
+                    entry.origin_x = read_i32!();
+                    entry.margin_left = read_i32!();
+                    entry.margin_right = read_i32!();
+                    entry.margin_bottom = read_i32!();
+                    entry.width = read_u32!();
+                    entry.transparent = read_bool!();
+                    entry.smooth = read_bool!();
+                    entry.preload = read_bool!();
+                    entry.bbox_mode = read_u32!();
+                    entry.sep_masks = read_u32!();
+                    entry.margin_top = read_i32!();
+                    entry.origin_y = read_i32!();
+                    for _ in 0..read_u32!() {
+                        entry.textures.push(read_u32!());
+                    }
+                    
+                    entry.mask_size = read_u32!();
+
+                    for _ in 0..entry.mask_size {
+                        entry.mask_data.push(read_bytes_vec!(((entry.width + 7) / 8 * entry.height) as usize));
+                    }
+                    if index + 1 < sprt_ptr.len() {
+                        let nptr = sprt_ptr[index + 1];
+                        let size = (data.position() as i64 - nptr as i64).unsigned_abs() as usize;
+                        if size > 0 {
+                            entry.mask_data.push(read_bytes_vec!(size));
+                        }
+                    }
+                    sprt.data.push(entry);
+                }
+
+                //info!("{:?}", sprt);
+                info!("SPRT OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // BGND Chunk
+            
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut bgnd_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    bgnd_ptr.push(read_u32!());
+                }
+
+                for ptr in bgnd_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = BgndData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.transparent = read_bool!();
+                    entry.smooth = read_bool!();
+                    entry.preload = read_bool!();
+                    entry.texture = read_u32!();
+
+                    bgnd.data.push(entry);
+                }
+
+                //info!("{:?}", bgnd);
+                info!("BGND OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // PATH Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut path_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    path_ptr.push(read_u32!());
+                }
+
+                for ptr in path_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = PathData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.smooth = read_bool!();
+                    entry.closed = read_bool!();
+                    entry.precision = read_u32!();
+                    for _ in 0..read_u32!() {
+                        let mut point = PathPoint {
+                            ..Default::default()
+                        };
+
+                        point.x = read_f32!();
+                        point.y = read_f32!();
+                        point.speed = read_f32!();
+
+                        entry.points.push(point);
+                    }
+
+                    path.data.push(entry);
+                }
+
+                //info!("{:?}", path);
+                info!("PATH OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // SCPT Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut scpt_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    scpt_ptr.push(read_u32!());
+                }
+
+                for ptr in scpt_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = ScptData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.id = read_u32!();
+
+                    scpt.data.push(entry);
+                }
+            }
+
+            info!("Offset: {}", data.position());
+            // GLOB Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                for _ in 0..read_u32!() {
+                    glob.items.push(read_u32!());
+                }
+
+                //info!("{:?}", glob);
+                info!("GLOB OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // SHDR Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut shdr_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    shdr_ptr.push(read_u32!());
+                }
+
+                for ptr in shdr_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = ShdrData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.kind = read_u32!();
+                    entry.glsl_es_vertex = read_string!();
+                    entry.glsl_es_fragment = read_string!();
+                    entry.glsl_vertex = read_string!();
+                    entry.glsl_fragment = read_string!();
+                    entry.hlsl9_vertex = read_string!();
+                    entry.hlsl9_fragment = read_string!();
+                    entry.hlsl11_vertex_data = read_u32!();
+                    entry.hlsl11_pixel_data = read_u32!();
+                    for _ in 0..read_u32!() {
+                        entry.vertex_shader_attributes.push(read_string!());
+                    }
+                    entry.version = read_u32!();
+                    entry.pssl_vertex_data = read_u32!();
+                    entry.pssl_pixel_data = read_u32!();
+                    entry.cg_psvita_vertex_data = read_u32!();
+                    entry.cg_psvita_pixel_data = read_u32!();
+                    entry.cg_ps3_vertex_data = read_u32!();
+                    entry.cg_ps3_pixel_data = read_u32!();
+                    entry.padding = read_bytes!(24);
+
+                    shdr.data.push(entry);
+                }
+
+                //info!("{:?}", shdr);
+                info!("SHDR OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // FONT Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut font_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    font_ptr.push(read_u32!());
+                }
+
+                for ptr in font_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = FontData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.display_name = read_string!();
+                    entry.em_size = read_u32!();
+                    entry.bold = read_bool!();
+                    entry.italic = read_bool!();
+                    entry.range_start = read_u16!();
+                    entry.charset = read_u8!();
+                    entry.antialiasing = read_u8!();
+                    entry.range_end = read_u16!();
+                    entry.unknown1 = read_u16!();
+                    entry.texture = read_u32!();
+                    entry.scale_x = read_f32!();
+                    entry.scale_y = read_f32!();
+                    
+                    let mut glyph_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        glyph_ptrs.push(read_u32!());
+                    }
+
+                    for glyph_ptr in glyph_ptrs {
+                        data.seek(SeekFrom::Start(glyph_ptr as u64)).unwrap();
+                        let mut glyph = FontGlyph {
+                            ..Default::default()
+                        };
+
+                        glyph.character = read_u16!();
+                        glyph.source_x = read_u16!();
+                        glyph.source_y = read_u16!();
+                        glyph.source_width = read_u16!();
+                        glyph.source_height = read_u16!();
+                        glyph.shift = read_i16!();
+                        glyph.offset = read_i16!();
+
+                        if read_u16!() != 0 {
+                            warn!("Glyph has Kerning!!! Offset: {}", data.position());
+                        }
+
+                        entry.glyph.push(glyph);
+                    }
+
+                    font.data.push(entry);
+                }
+
+                font.buffer = read_bytes_vec!(512);
+
+                //info!("{:?}", font);
+                info!("FONT OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // TMLN Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let timeline_amount = read_u32!();
+
+                if timeline_amount > 0 {
+                    error!("There's {} timelines, while expecting 0 timelines.", timeline_amount);
+                    return Ok(());
+                }
+            }
+
+            info!("Offset: {}", data.position());
+            // OBJT Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut objt_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    objt_ptr.push(read_u32!());
+                }
+                for ptr in objt_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = ObjtData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.sprite = read_i32!();
+                    entry.visible = read_bool!();
+                    entry.solid = read_bool!();
+                    entry.depth = read_i32!();
+                    entry.persistent = read_bool!();
+                    entry.parent = read_i32!();
+                    entry.texture_mask_id = read_i32!();
+                    entry.uses_physics = read_bool!();
+                    entry.is_sensor = read_bool!();
+                    entry.collision_shape = read_u32!();
+                    entry.density = read_f32!();
+                    entry.restitution = read_f32!();
+                    entry.group = read_u32!();
+                    entry.linear_dampling = read_f32!();
+                    entry.angular_dampling = read_f32!();
+                    let physics_shape_vertex_count = read_u32!();
+                    entry.friction = read_f32!();
+                    entry.awake = read_bool!();
+                    entry.kinematic = read_bool!();
+                    for _ in 0..physics_shape_vertex_count {
+                        let mut vertex = ObjtPhysicsVertex {
+                            ..Default::default()
+                        };
+                        vertex.x = read_f32!();
+                        vertex.y = read_f32!();
+
+                        entry.physics_shape_vertices.push(vertex);
+                    }
+                    let mut event_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        event_ptrs.push(read_u32!());
+                    }
+
+                    for event_ptr in event_ptrs {
+                        data.seek(SeekFrom::Start(event_ptr as u64)).unwrap();
+                        let mut subevent_ptrs = Vec::new();
+                        for _ in 0..read_u32!() {
+                            subevent_ptrs.push(read_u32!());
+                        }
+
+                        let mut events = Vec::new();
+
+                        for subevent_ptr in subevent_ptrs {
+                            data.seek(SeekFrom::Start(subevent_ptr as u64)).unwrap();
+                            let mut event = ObjtEvent {
+                                ..Default::default()
+                            };
+
+                            event.event_subtype = read_u32!();
+                            let mut action_ptrs = Vec::new();
+                            for _ in 0..read_u32!() {
+                                action_ptrs.push(read_u32!());
+                            }
+
+                            for action_ptr in action_ptrs {
+                                data.seek(SeekFrom::Start(action_ptr as u64)).unwrap();
+                                let mut action = ObjtEventAction {
+                                    ..Default::default()
+                                };
+
+                                action.lib_id = read_u32!();
+                                action.id = read_u32!();
+                                action.kind = read_u32!();
+                                action.use_relative = read_bool!();
+                                action.is_question = read_bool!();
+                                action.use_apply_to = read_bool!();
+                                action.exe_type = read_u32!();
+                                action.action_name = read_string!();
+                                action.code_id = read_u32!();
+                                action.argument_count = read_u32!();
+                                action.who = read_i32!();
+                                action.relative = read_bool!();
+                                action.is_not = read_bool!();
+                                action.unknown1 = read_u32!();
+
+                                event.event_action.push(action);
+                            }
+
+                            events.push(event);
+                        }
+
+                        entry.events.push(events);
+                    }
+
+                    objt.data.push(entry);
+                }
+
+                //info!("{:?}", objt);
+                info!("OBJT OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            // ROOM Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut room_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    room_ptr.push(read_u32!());
+                }
+                for ptr in room_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = RoomData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.caption = read_string!();
+                    entry.width = read_u32!();
+                    entry.height = read_u32!();
+                    entry.speed = read_u32!();
+                    entry.persistent = read_bool!();
+                    entry.background_color = read_u32!();
+                    entry.draw_background_color = read_bool!();
+                    entry.creation_code_id = read_u32!();
+                    entry.flags = read_u32!();
+                    let background_ptr = read_u32!();
+                    let view_ptr = read_u32!();
+                    let objects_ptr = read_u32!();
+                    let tiles_ptr = read_u32!();
+                    entry.world = read_bool!();
+                    entry.top = read_u32!();
+                    entry.left = read_u32!();
+                    entry.right = read_u32!();
+                    entry.bottom = read_u32!();
+                    entry.gravity_x = read_f32!();
+                    entry.gravity_y = read_f32!();
+                    entry.meters_per_pixel = read_f32!();
+
                     data.seek(SeekFrom::Start(background_ptr as u64)).unwrap();
-                    let mut background = RoomBackground {
-                        ..Default::default()
-                    };
+                    let mut background_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        background_ptrs.push(read_u32!());
+                    }
+                    for background_ptr in background_ptrs {
+                        data.seek(SeekFrom::Start(background_ptr as u64)).unwrap();
+                        let mut background = RoomBackground {
+                            ..Default::default()
+                        };
 
-                    background.enabled = read_bool!();
-                    background.foreground = read_bool!();
-                    background.definition = read_i32!();
-                    background.x = read_i32!();
-                    background.y = read_i32!();
-                    background.tile_x = read_i32!();
-                    background.tile_y = read_i32!();
-                    background.speed_x = read_i32!();
-                    background.speed_y = read_i32!();
-                    background.stretch = read_bool!();
+                        background.enabled = read_bool!();
+                        background.foreground = read_bool!();
+                        background.definition = read_i32!();
+                        background.x = read_i32!();
+                        background.y = read_i32!();
+                        background.tile_x = read_i32!();
+                        background.tile_y = read_i32!();
+                        background.speed_x = read_i32!();
+                        background.speed_y = read_i32!();
+                        background.stretch = read_bool!();
 
-                    entry.backgrounds.push(background);
-                }
-                data.seek(SeekFrom::Start(view_ptr as u64)).unwrap();
-                let mut view_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    view_ptrs.push(read_u32!());
-                }
-                for view_ptr in view_ptrs {
+                        entry.backgrounds.push(background);
+                    }
                     data.seek(SeekFrom::Start(view_ptr as u64)).unwrap();
-                    let mut view = RoomView {
-                        ..Default::default()
-                    };
+                    let mut view_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        view_ptrs.push(read_u32!());
+                    }
+                    for view_ptr in view_ptrs {
+                        data.seek(SeekFrom::Start(view_ptr as u64)).unwrap();
+                        let mut view = RoomView {
+                            ..Default::default()
+                        };
 
-                    view.enabled = read_bool!();
-                    view.view_x = read_i32!();
-                    view.view_y = read_i32!();
-                    view.view_width = read_i32!();
-                    view.view_height = read_i32!();
-                    view.port_x = read_i32!();
-                    view.port_y = read_i32!();
-                    view.port_width = read_i32!();
-                    view.port_height = read_i32!();
-                    view.border_x = read_u32!();
-                    view.border_y = read_u32!();
-                    view.speed_x = read_i32!();
-                    view.speed_y = read_i32!();
-                    view.object_id = read_i32!();
+                        view.enabled = read_bool!();
+                        view.view_x = read_i32!();
+                        view.view_y = read_i32!();
+                        view.view_width = read_i32!();
+                        view.view_height = read_i32!();
+                        view.port_x = read_i32!();
+                        view.port_y = read_i32!();
+                        view.port_width = read_i32!();
+                        view.port_height = read_i32!();
+                        view.border_x = read_u32!();
+                        view.border_y = read_u32!();
+                        view.speed_x = read_i32!();
+                        view.speed_y = read_i32!();
+                        view.object_id = read_i32!();
 
-                    entry.views.push(view);
-                }
-                data.seek(SeekFrom::Start(objects_ptr as u64)).unwrap();
-                let mut objects_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    objects_ptrs.push(read_u32!());
-                }
-                for objects_ptr in objects_ptrs {
+                        entry.views.push(view);
+                    }
                     data.seek(SeekFrom::Start(objects_ptr as u64)).unwrap();
-                    let mut object = RoomObject {
-                        ..Default::default()
-                    };
+                    let mut objects_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        objects_ptrs.push(read_u32!());
+                    }
+                    for objects_ptr in objects_ptrs {
+                        data.seek(SeekFrom::Start(objects_ptr as u64)).unwrap();
+                        let mut object = RoomObject {
+                            ..Default::default()
+                        };
 
-                    object.x = read_i32!();
-                    object.y = read_i32!();
-                    object.object_id = read_i32!();
-                    object.instance_id = read_u32!();
-                    object.creation_code = read_i32!();
-                    object.scale_x = read_f32!();
-                    object.scale_y = read_f32!();
-                    object.color = read_u32!();
-                    object.angle = read_f32!();
-                    object.pre_creation_code = read_i32!();
+                        object.x = read_i32!();
+                        object.y = read_i32!();
+                        object.object_id = read_i32!();
+                        object.instance_id = read_u32!();
+                        object.creation_code = read_i32!();
+                        object.scale_x = read_f32!();
+                        object.scale_y = read_f32!();
+                        object.color = read_u32!();
+                        object.angle = read_f32!();
+                        object.pre_creation_code = read_i32!();
 
-                    entry.game_objects.push(object);
-                }
-                data.seek(SeekFrom::Start(tiles_ptr as u64)).unwrap();
-                let mut tiles_ptrs = Vec::new();
-                for _ in 0..read_u32!() {
-                    tiles_ptrs.push(read_u32!());
-                }
-                for tiles_ptr in tiles_ptrs {
+                        entry.game_objects.push(object);
+                    }
                     data.seek(SeekFrom::Start(tiles_ptr as u64)).unwrap();
-                    let mut tile = RoomTile {
-                        ..Default::default()
-                    };
+                    let mut tiles_ptrs = Vec::new();
+                    for _ in 0..read_u32!() {
+                        tiles_ptrs.push(read_u32!());
+                    }
+                    for tiles_ptr in tiles_ptrs {
+                        data.seek(SeekFrom::Start(tiles_ptr as u64)).unwrap();
+                        let mut tile = RoomTile {
+                            ..Default::default()
+                        };
 
-                    tile.x = read_i32!();
-                    tile.y = read_i32!();
-                    tile.background_id = read_i32!();
-                    tile.source_x = read_u32!();
-                    tile.source_y = read_u32!();
-                    tile.width = read_u32!();
-                    tile.height = read_u32!();
-                    tile.tile_depth = read_i32!();
-                    tile.instance_id = read_u32!();
-                    tile.scale_x = read_f32!();
-                    tile.scale_y = read_f32!();
-                    tile.color = read_u32!();
+                        tile.x = read_i32!();
+                        tile.y = read_i32!();
+                        tile.background_id = read_i32!();
+                        tile.source_x = read_u32!();
+                        tile.source_y = read_u32!();
+                        tile.width = read_u32!();
+                        tile.height = read_u32!();
+                        tile.tile_depth = read_i32!();
+                        tile.instance_id = read_u32!();
+                        tile.scale_x = read_f32!();
+                        tile.scale_y = read_f32!();
+                        tile.color = read_u32!();
 
-                    entry.tiles.push(tile);
+                        entry.tiles.push(tile);
+                    }
+
+                    room.data.push(entry);
                 }
 
-                room.data.push(entry);
+                //info!("{:?}", room);
+                info!("ROOM OK!");
             }
 
-            //info!("{:?}", room);
-            info!("ROOM OK!");
-        }
+            info!("Offset: {}", data.position());
+            // DAFL Chunk
 
-        info!("Offset: {}", data.position());
-        // DAFL Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            info!("DAFL OK!");
-        }
-
-        info!("Offset: {}", data.position());
-        // TPAG Chunk
-
-        {
-            data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-            let mut tpag_ptr = Vec::new();
-            for _ in 0..read_u32!() {
-                tpag_ptr.push(read_u32!());
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                info!("DAFL OK!");
             }
-            for ptr in tpag_ptr {
-                data.seek(SeekFrom::Start(ptr as u64)).unwrap();
-                let mut entry = RoomData {
-                    ..Default::default()
+
+            info!("Offset: {}", data.position());
+            // TPAG Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut tpag_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    tpag_ptr.push(read_u32!());
+                }
+                for ptr in tpag_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = RoomData {
+                        ..Default::default()
+                    };
+                }
+
+                //info!("{:?}", tpag);
+                info!("TPAG OK!");
+            }
+
+            info!("Offset: {}", data.position());
+            //
+        }
+
+        // Temmie Flakes serializer
+        
+        {
+            info!("Start serializing...");
+            let mut data: Vec<u8> = Vec::new();
+
+            let mut chunk_offsets: Vec<usize> = Vec::new();
+            let mut string_pointers: HashMap<String, (Option<u32>, Vec<usize>)> = HashMap::new(); // HashMap<String text, (String pointer, Vec<text pointing>)>
+            macro_rules! write_chunk {
+                ($name: expr) => {
+                    {
+                        chunk_offsets.push(data.len());
+                        data.extend($name.as_bytes());
+                        data.extend([0x00, 0x00, 0x00, 0x00]); // Size
+                    }
+                };
+            }
+            macro_rules! cache_string {
+                ($text: expr) => {
+                    {
+                        let text = $text.to_string();
+                        if string_pointers.contains_key(&text) {
+                            string_pointers.get_mut(&text).unwrap()
+                                .0 = Some((data.len() + 4) as u32);
+                        }else{
+                            string_pointers.insert(text, (
+                                Some((data.len() + 4) as u32),
+                                Vec::new()
+                            ));
+                        }
+                    }
+                };
+            }
+            macro_rules! write_string {
+                ($text: expr) => {
+                    let text = $text.to_string();
+                    cache_string!(text);
+                    data.extend((text.len() as u32).to_le_bytes());
+                    data.extend(text.as_bytes());
+                    data.push(0);
+                };
+                ($text: expr, $cache: expr) => {
+                    let text = $text.to_string();
+                    if $cache {
+                        cache_string!(text);
+                    }
+                    data.extend((text.len() as u32).to_le_bytes());
+                    data.extend(text.as_bytes());
+                    data.push(0);
+                };
+            }
+            macro_rules! point_string {
+                ($text: expr) => {
+                    {
+                        let text = $text.to_string();
+                        if string_pointers.contains_key(&text) {
+                            let d = string_pointers.get_mut(&text).unwrap();
+                            if let Some(ptr) = d.0 {
+                                write_value!(u32, ptr);
+                            }else{
+                                write_value!(u32, 0); // null
+                                d.1.push(data.len());
+                            }
+                        }else{
+                            string_pointers.insert(text, (
+                                None,
+                                vec![data.len()]
+                            ));
+                        }
+                    }
+                };
+            }
+            macro_rules! write_value {
+                ($kind: ty, $value: expr) => {
+                    data.extend(($value as $kind).to_le_bytes());
+                };
+            }
+            macro_rules! poke_value {
+                ($kind: ty, $offset: expr, $value: expr) => {
+                    {
+                        ($value as $kind).to_le_bytes().iter().enumerate()
+                            .for_each(|(index, value)| {
+                                data[$offset + index] = *value;
+                            });
+                    }
                 };
             }
 
-            //info!("{:?}", tpag);
-            info!("TPAG OK!");
+            // Sampling (tests for now)
+
+            write_chunk!("FORM");
+            let offset = data.len();
+            write_value!(u32, 999);
+            poke_value!(u32, offset, 128);
+            point_string!("z"); // This will give a warning at runtime (when finalizing the serializing).
+            write_string!("a");
+            point_string!("a"); // Pointer here
+            point_string!("abc"); // And also here
+            write_string!("abc");
+
+            // Finalize serializing
+
+            {
+                info!("Preparing to finalize serializing...");
+
+                string_pointers.iter()
+                    .for_each(|(text, (pointer, values))| {
+                        if let Some(pointer) = *pointer {
+                            values.iter()
+                                .for_each(|value| {
+                                    poke_value!(u32, *value, pointer);
+                                });
+                        }else{
+                            warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
+                        }
+                    });
+                
+                info!("Finalized serializing.");
+            }
+            
+            // Save data.win
+
+            {
+                info!("Saving data...");
+
+                let mut f = BufWriter::new(File::create("data.win").unwrap());
+                f.write_all(&data).unwrap();
+                f.flush().unwrap();
+                drop(f);
+
+                let mut size = data.len() as f64;
+                let mut kind = "byte(s)";
+
+                while size >= 1000.0 {
+                    size /= 1024.0;
+                    kind = match kind {
+                        "byte(s)" => "KB",
+                        "KB" => "MB",
+                        "MB" => "GB",
+                        _ => ">GB"
+                    }
+                }
+                
+                info!("Saved data.win with size of {} {}",
+                    if size.floor() != size {
+                        format!("{:.2}", size)
+                    }else{
+                        format!("{}", size.floor())
+                    }, kind);
+            }
         }
-
-        info!("Offset: {}", data.position());
-        //
     }
-
-    // Temmie Flakes serializer (data.win writer)
-
-    /* Insert code here */
 
     Ok(())
 }
