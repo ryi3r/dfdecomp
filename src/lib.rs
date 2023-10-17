@@ -187,7 +187,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         struct Gen8Chunk {
             is_debugged_disabled: bool,
             bytecode_version: u8,
-            unknown: u16,
+            unknown1: u16,
             filename: String,
             config: String,
             last_obj: u32,
@@ -594,6 +594,20 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             texture_id: i16
         }
 
+        #[derive(Default, Debug)]
+        struct CodeChunk {
+            data: Vec<CodeData>
+        }
+        #[derive(Default, Debug)]
+        struct CodeData {
+            name: String,
+            length: u32,
+            locals_count: u16,
+            arguments_count: u16,
+            code: Vec<u8>,
+            offset: u32
+        }
+
         let mut form = FormChunk { ..Default::default() };
         let mut gen8 = Gen8Chunk { ..Default::default() };
         let mut optn = OptnChunk { ..Default::default() };
@@ -611,17 +625,27 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         // TMLN goes here, if I add it one day.
         let mut objt = ObjtChunk { ..Default::default() };
         let mut room = RoomChunk { ..Default::default() };
+        let mut tpag = TpagChunk { ..Default::default() };
+        let mut code = CodeChunk { ..Default::default() };
 
         // Unserializer
 
         {
+            macro_rules! show_offset {
+                () => {
+                    {
+                        info!("Offset: {}", data.position());
+                    }
+                };
+            }
+
             info!("Start unserializing...");
             // Start reading the data...
 
-            /*let mut file = BufWriter::new(File::create("dump").unwrap());
-            file.write_all(&data.clone().into_inner()).unwrap();
+            let mut file = BufWriter::new(File::create("dump").unwrap());
+            file.write_all(data.clone().into_inner()).unwrap();
             file.flush().unwrap();
-            drop(file);*/
+            drop(file);
 
             // FORM Chunk
 
@@ -630,7 +654,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 form.size = data.read_u32::<LittleEndian>().unwrap();
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();            
             // GEN8 Chunk
 
             {
@@ -640,7 +664,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 if gen8.bytecode_version != 16 {
                     info!("Warning: Expected Bytecode 16, found Bytecode {}", gen8.bytecode_version);
                 }
-                gen8.unknown = read_u16!();
+                gen8.unknown1 = read_u16!();
                 gen8.filename = read_string!();
                 gen8.config = read_string!();
                 gen8.last_obj = read_u32!();
@@ -672,7 +696,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("GEN8 OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // OPTN Chunk
 
             {
@@ -701,7 +725,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("OPTN OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // LANG Chunk
 
             {
@@ -714,7 +738,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("LANG OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // EXTN Chunk
 
             {
@@ -786,7 +810,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("EXTN OK!");
             }
             
-            info!("Offset: {}", data.position());
+            show_offset!();
             // SOND Chunk
 
             {
@@ -818,7 +842,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("SOND OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // ARGP Chunk
 
             {
@@ -837,7 +861,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("ARGP OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // SPRT Chunk
 
             {
@@ -890,7 +914,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("SPRT OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // BGND Chunk
             
             {
@@ -919,7 +943,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("BGND OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // PATH Chunk
 
             {
@@ -958,7 +982,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("PATH OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // SCPT Chunk
 
             {
@@ -981,7 +1005,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // GLOB Chunk
 
             {
@@ -994,7 +1018,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("GLOB OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // SHDR Chunk
 
             {
@@ -1039,7 +1063,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("SHDR OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // FONT Chunk
 
             {
@@ -1104,7 +1128,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("FONT OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // TMLN Chunk
 
             {
@@ -1117,7 +1141,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // OBJT Chunk
 
             {
@@ -1224,7 +1248,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("OBJT OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // ROOM Chunk
 
             {
@@ -1372,15 +1396,16 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("ROOM OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // DAFL Chunk
 
             {
                 data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                
                 info!("DAFL OK!");
             }
 
-            info!("Offset: {}", data.position());
+            show_offset!();
             // TPAG Chunk
 
             {
@@ -1391,14 +1416,54 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
                 for ptr in tpag_ptr {
                     data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let entry = TpagData {
+                        ..Default::default()
+                    };
+
+                    tpag.data.push(entry);
                 }
+
+                // Use this until I figure out how to read the
+                // chunk (offsets to the next chunk)
+                data.seek(SeekFrom::Current(24)).unwrap();
 
                 //info!("{:?}", tpag);
                 info!("TPAG OK!");
             }
 
-            info!("Offset: {}", data.position());
-            //
+            show_offset!();
+            // CODE Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let mut code_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    code_ptr.push(read_u32!());
+                }
+                for ptr in code_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = CodeData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.length = read_u32!();
+                    entry.locals_count = read_u16!();
+                    entry.arguments_count = read_u16!();
+                    let relative_addr = read_i32!();
+                    let addr = (data.position() as i32 - 4 - relative_addr) as u64;
+                    let pos = data.position();
+                    data.seek(SeekFrom::Start(addr)).unwrap();
+                    entry.code = read_bytes_vec!(entry.length as usize);
+                    data.seek(SeekFrom::Start(pos)).unwrap();
+                    entry.offset = read_u32!();
+
+                    code.data.push(entry);
+                }
+            }
+
+            show_offset!();
+            info!("Finished unserializing.");
         }
 
         // Temmie Flakes serializer
@@ -1414,10 +1479,11 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     {
                         chunk_offsets.push(data.len());
                         data.extend($name.as_bytes());
-                        data.extend([0x00, 0x00, 0x00, 0x00]); // Size
+                        write_value!(u32, 0x00_00_00_00); // Empty size
                     }
                 };
             }
+            #[allow(unused_macros)]
             macro_rules! cache_string {
                 ($text: expr) => {
                     {
@@ -1434,22 +1500,27 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     }
                 };
             }
+            #[allow(unused_macros)]
             macro_rules! write_string {
                 ($text: expr) => {
-                    let text = $text.to_string();
-                    cache_string!(text);
-                    data.extend((text.len() as u32).to_le_bytes());
-                    data.extend(text.as_bytes());
-                    data.push(0);
+                    {
+                        let text = $text.to_string();
+                        cache_string!(text);
+                        data.extend((text.len() as u32).to_le_bytes());
+                        data.extend(text.as_bytes());
+                        write_value!(u8, 0x00);
+                    }
                 };
                 ($text: expr, $cache: expr) => {
-                    let text = $text.to_string();
-                    if $cache {
-                        cache_string!(text);
+                    {
+                        let text = $text.to_string();
+                        if $cache {
+                            cache_string!(text);
+                        }
+                        data.extend((text.len() as u32).to_le_bytes());
+                        data.extend(text.as_bytes());
+                        write_value!(u8, 0x00);
                     }
-                    data.extend((text.len() as u32).to_le_bytes());
-                    data.extend(text.as_bytes());
-                    data.push(0);
                 };
             }
             macro_rules! point_string {
@@ -1461,7 +1532,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                             if let Some(ptr) = d.0 {
                                 write_value!(u32, ptr);
                             }else{
-                                write_value!(u32, 0); // null
+                                write_value!(u32, 0x00_00_00_00); // null pointer
                                 d.1.push(data.len());
                             }
                         }else{
@@ -1469,13 +1540,16 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                                 None,
                                 vec![data.len()]
                             ));
+                            write_value!(u32, 0x00_00_00_00); // null pointer
                         }
                     }
                 };
             }
             macro_rules! write_value {
                 ($kind: ty, $value: expr) => {
-                    data.extend(($value as $kind).to_le_bytes());
+                    {
+                        data.extend(($value as $kind).to_le_bytes());
+                    }
                 };
             }
             macro_rules! poke_value {
@@ -1488,23 +1562,762 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     }
                 };
             }
+            macro_rules! write_bool {
+                ($value: expr) => {
+                    {
+                        write_value!(u32, $value as u32);
+                    }
+                };
+            }
+            #[allow(unused_macros)]
+            macro_rules! poke_bool {
+                ($offset: expr, $value: expr) => {
+                    {
+                        poke_value!(u32, $offset, $value as u32);
+                    }
+                };
+            }
+            macro_rules! write_bytes {
+                ($value: expr) => {
+                    {
+                        data.extend($value);
+                    }
+                };
+            }
+            #[allow(unused_macros)]
+            macro_rules! poke_bytes {
+                ($offset: expr, $value: expr) => {
+                    {
+                        $value.iter().enumerate()
+                            .for_each(|(index, value)| {
+                                data[$offset + index] = *value;
+                            });
+                    }
+                };
+            }
+            macro_rules! show_offset {
+                () => {
+                    info!("Offset: {}", data.len());
+                };
+            }
 
-            // Sampling (tests for now)
+            // FORM Chunk
 
-            write_chunk!("FORM");
-            let offset = data.len();
-            write_value!(u32, 999);
-            poke_value!(u32, offset, 128);
-            point_string!("z"); // This will give a warning at runtime (when finalizing the serializing).
-            write_string!("a");
-            point_string!("a"); // Pointer here
-            point_string!("abc"); // And also here
-            write_string!("abc");
+            {
+                write_chunk!("FORM");
+                info!("FORM OK!");
+            }
+            
+            show_offset!();
+            // GEN8 Chunk
+
+            {
+                write_chunk!("GEN8");
+                write_bool!(gen8.is_debugged_disabled);
+                write_value!(u8, gen8.bytecode_version);
+                write_value!(u16, gen8.unknown1);
+                point_string!(gen8.filename);
+                point_string!(gen8.config);
+                write_value!(u32, gen8.last_obj);
+                write_value!(u32, gen8.last_tile);
+                write_value!(u32, gen8.game_id);
+                write_bytes!(gen8.guid_data);
+                point_string!(gen8.name);
+                write_value!(u32, gen8.major);
+                write_value!(u32, gen8.minor);
+                write_value!(u32, gen8.release);
+                write_value!(u32, gen8.build);
+                write_value!(u32, gen8.default_window_width);
+                write_value!(u32, gen8.default_window_height);
+                write_value!(u32, gen8.info);
+                write_value!(u32, gen8.license_crc32);
+                write_bytes!(gen8.license_md5);
+                write_value!(u64, gen8.timestamp);
+                point_string!(gen8.display_name);
+                write_value!(u64, gen8.active_targets);
+                write_value!(u64, gen8.function_classifications);
+                write_value!(u32, gen8.steam_app_id);
+                write_value!(u32, gen8.debugger_port);
+                write_value!(u32, gen8.room_order.len());
+                for room in gen8.room_order.iter() {
+                    write_value!(u32, *room);
+                }
+
+                info!("GEN8 OK!");
+            }
+
+            show_offset!();
+            // OPTN Chunk
+
+            {
+                write_value!(u32, optn.unknown1);
+                write_value!(u32, optn.unknown2);
+                write_value!(u64, optn.info);
+                write_value!(i32, optn.scale);
+                write_value!(u32, optn.window_color);
+                write_value!(u32, optn.color_depth);
+                write_value!(u32, optn.resolution);
+                write_value!(u32, optn.frequency);
+                write_value!(u32, optn.vertex_sync);
+                write_value!(u32, optn.priority);
+                write_value!(u32, optn.back_image);
+                write_value!(u32, optn.front_image);
+                write_value!(u32, optn.load_image);
+                write_value!(u32, optn.load_alpha);
+                write_value!(u32, optn.constants.len());
+                for (name, value) in optn.constants.iter() {
+                    point_string!(*name);
+                    point_string!(*value);
+                }
+
+                info!("OPTN OK!");
+            }
+
+            show_offset!();
+            // LANG Chunk
+
+            {
+                write_chunk!("LANG");
+                write_value!(u32, lang.unknown1);
+                write_value!(u32, lang.language_count);
+                write_value!(u32, lang.entry_count);
+
+                info!("LANG OK!");
+            }
+
+            show_offset!();
+            // EXTN Chunk
+
+            {
+                write_chunk!("EXTN");
+                let mut extn_ptr = Vec::new();
+                write_value!(u32, extn.data.len());
+                for _ in 0..extn.data.len() {
+                    extn_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00); // null
+                }
+                for (index, entry) in extn.data.iter().enumerate() {
+                    poke_value!(u32, extn_ptr[index], data.len());
+
+                    point_string!(entry.empty_string);
+                    point_string!(entry.extension_name);
+                    point_string!(entry.class_name);
+
+                    let mut file_ptr = Vec::new();
+                    write_value!(u32, entry.extension_includes.len());
+                    for _ in 0..entry.extension_includes.len() {
+                        file_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00); // null
+                    }
+                    for (index, file) in entry.extension_includes.iter().enumerate() {
+                        poke_value!(u32, file_ptr[index], data.len());
+
+                        point_string!(file.filename);
+                        point_string!(file.end_function);
+                        point_string!(file.start_function);
+                        write_value!(i32, file.file_kind);
+
+                        let mut func_ptr = Vec::new();
+                        write_value!(u32, file.file_functions.len());
+                        for _ in 0..file.file_functions.len() {
+                            func_ptr.push(data.len());
+                            write_value!(u32, 0x00_00_00_00); // null
+                        }
+                        for (index, func) in file.file_functions.iter().enumerate() {
+                            poke_value!(u32, func_ptr[index], data.len());
+
+                            point_string!(func.name);
+                            write_value!(u32, func.id);
+                            write_value!(u32, func.function_kind);
+                            write_value!(u32, func.return_kind);
+                            point_string!(func.external_name);
+                            write_value!(u32, func.arguments.len());
+                            for value in func.arguments.iter() {
+                                write_value!(u32, *value);
+                            }
+                        }
+                    }
+                }
+
+                info!("EXTN OK!");
+            }
+
+            show_offset!();
+            // SOND Chunk
+
+            {
+                write_chunk!("SOND");
+                let mut sond_ptr = Vec::new();
+                for _ in 0..sond.data.len() {
+                    sond_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in sond.data.iter().enumerate() {
+                    poke_value!(u32, sond_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(u32, entry.flags);
+                    point_string!(entry.kind);
+                    point_string!(entry.file);
+                    write_value!(u32, entry.effects);
+                    write_value!(f32, entry.volume);
+                    write_value!(f32, entry.pitch);
+                    write_value!(u32, entry.group_id);
+                    write_value!(u32, entry.audio_id);
+                }
+
+                info!("SOND OK!");
+            }
+
+            show_offset!();
+            // ARGP Chunk
+
+            {
+                write_chunk!("ARGP");
+
+                let mut argp_ptr = Vec::new();
+                write_value!(u32, argp.names.len());
+                for _ in 0..argp.names.len() {
+                    argp_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00); // null
+                }
+                for (index, name) in argp.names.iter().enumerate() {
+                    poke_value!(u32, argp_ptr[index], data.len());
+                    point_string!(*name);
+                }
+
+                info!("ARGP OK!");
+            }
+
+            show_offset!();
+            // SPRT Chunk
+
+            {
+                write_chunk!("SPRT");
+                write_value!(u32, sprt.data.len());
+                let mut sprt_ptr = Vec::new();
+                for _ in 0..sprt.data.len() {
+                    sprt_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00); // null
+                }
+                for (index, entry) in sprt.data.iter().enumerate() {
+                    poke_value!(u32, sprt_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(u32, entry.width);
+                    write_value!(u32, entry.height);
+                    write_value!(i32, entry.margin_left);
+                    write_value!(i32, entry.margin_right);
+                    write_value!(i32, entry.margin_bottom);
+                    write_value!(i32, entry.margin_top);
+                    write_bool!(entry.transparent);
+                    write_bool!(entry.smooth);
+                    write_bool!(entry.preload);
+                    write_value!(u32, entry.bbox_mode);
+                    write_value!(u32, entry.sep_masks);
+                    write_value!(i32, entry.origin_x);
+                    write_value!(i32, entry.origin_y);
+                    write_value!(u32, entry.textures.len());
+                    for texture in entry.textures.iter() {
+                        write_value!(u32, *texture);
+                    }
+                    write_value!(u32, entry.mask_size);
+                    for i in 0..entry.mask_size {
+                        write_bytes!(&entry.mask_data[i as usize]);
+                    }
+                }
+
+                info!("SPRT OK!");
+            }
+            
+            show_offset!();
+            // BGND Chunk
+
+            {
+                write_chunk!("BGND");
+                let mut bgnd_ptr = Vec::new();
+                for _ in 0..bgnd.data.len() {
+                    bgnd_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00); // null
+                }
+                for (index, entry) in bgnd.data.iter().enumerate() {
+                    poke_value!(u32, bgnd_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_bool!(entry.transparent);
+                    write_bool!(entry.smooth);
+                    write_bool!(entry.preload);
+                    write_value!(u32, entry.texture);
+                }
+
+                info!("BGND OK!");
+            }
+
+            show_offset!();
+            // PATH Chunk
+
+            {
+                write_chunk!("PATH");
+                let mut path_ptr = Vec::new();
+                for _ in 0..path.data.len() {
+                    path_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in path.data.iter().enumerate() {
+                    poke_value!(u32, path_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_bool!(entry.smooth);
+                    write_bool!(entry.closed);
+                    write_value!(u32, entry.precision);
+                    write_value!(u32, entry.points.len());
+                    for point in entry.points.iter() {
+                        write_value!(f32, point.x);
+                        write_value!(f32, point.y);
+                        write_value!(f32, point.speed);
+                    }
+                }
+
+                info!("PATH OK!");
+            }
+
+            show_offset!();
+            // SCPT Chunk
+
+            {
+                write_chunk!("SCPT");
+                let mut scpt_ptr = Vec::new();
+                for _ in 0..scpt.data.len() {
+                    scpt_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in scpt.data.iter().enumerate() {
+                    poke_value!(u32, scpt_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(u32, entry.id);
+                }
+
+                info!("SCPT OK!");
+            }
+
+            show_offset!();
+            // GLOB Chunk
+
+            {
+                write_chunk!("GLOB");
+                write_value!(u32, glob.items.len());
+                for entry in glob.items.iter() {
+                    write_value!(u32, *entry);
+                }
+
+                info!("GLOB OK!");
+            }
+
+            show_offset!();
+            // SHDR Chunk
+
+            {
+                write_chunk!("SHDR");
+                let mut shdr_ptr = Vec::new();
+                write_value!(u32, shdr.data.len());
+                for _ in 0..shdr.data.len() {
+                    shdr_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in shdr.data.iter().enumerate() {
+                    poke_value!(u32, shdr_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(u32, entry.kind);
+                    point_string!(entry.glsl_es_vertex);
+                    point_string!(entry.glsl_es_fragment);
+                    point_string!(entry.glsl_vertex);
+                    point_string!(entry.glsl_fragment);
+                    point_string!(entry.hlsl9_vertex);
+                    point_string!(entry.hlsl9_fragment);
+                    write_value!(u32, entry.hlsl11_vertex_data);
+                    write_value!(u32, entry.hlsl11_pixel_data);
+                    write_value!(u32, entry.vertex_shader_attributes.len());
+                    for attribute in entry.vertex_shader_attributes.iter() {
+                        point_string!(*attribute);
+                    }
+                    write_value!(u32, entry.version);
+                    write_value!(u32, entry.pssl_vertex_data);
+                    write_value!(u32, entry.pssl_pixel_data);
+                    write_value!(u32, entry.cg_psvita_vertex_data);
+                    write_value!(u32, entry.cg_psvita_pixel_data);
+                    write_value!(u32, entry.cg_ps3_vertex_data);
+                    write_value!(u32, entry.cg_ps3_pixel_data);
+                    write_bytes!(entry.padding);
+                }
+
+                info!("SHDR OK!");
+            }
+
+            show_offset!();
+            // FONT Chunk
+
+            {
+                write_chunk!("FONT");
+                let mut font_ptr = Vec::new();
+                write_value!(u32, font.data.len());
+                for _ in 0..font.data.len() {
+                    font_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in font.data.iter().enumerate() {
+                    poke_value!(u32, font_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    point_string!(entry.display_name);
+                    write_value!(u32, entry.em_size);
+                    write_value!(u32, entry.bold);
+                    write_value!(u32, entry.italic);
+                    write_value!(u16, entry.range_start);
+                    write_value!(u8, entry.charset);
+                    write_value!(u8, entry.antialiasing);
+                    write_value!(u16, entry.range_end);
+                    write_value!(u32, entry.texture);
+                    write_value!(f32, entry.scale_x);
+                    write_value!(f32, entry.scale_y);
+
+                    let mut glyph_ptr = Vec::new();
+                    write_value!(u32, entry.glyph.len());
+                    for _ in 0..entry.glyph.len() {
+                        glyph_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, glyph) in entry.glyph.iter().enumerate() {
+                        poke_value!(u32, glyph_ptr[index], data.len());
+
+                        write_value!(u16, glyph.character);
+                        write_value!(u16, glyph.source_x);
+                        write_value!(u16, glyph.source_y);
+                        write_value!(u16, glyph.source_width);
+                        write_value!(u16, glyph.source_height);
+                        write_value!(i16, glyph.shift);
+                        write_value!(i16, glyph.offset);
+                        write_value!(u16, 0); // Glyph Kerning
+                    }
+                }
+                write_bytes!(font.buffer);
+
+                info!("FONT OK!");
+            }
+
+            show_offset!();
+            // TMLN Chunk
+
+            {
+                write_chunk!("TMLN");
+                write_value!(u32, 0); // Timeline amount
+
+                info!("TMLN OK!");
+            }
+
+            show_offset!();
+            // OBJT Chunk
+
+            {
+                write_chunk!("OBJT");
+
+                let mut objt_ptr = Vec::new();
+                write_value!(u32, objt.data.len());
+                for _ in 0..objt.data.len() {
+                    objt_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in objt.data.iter().enumerate() {
+                    poke_value!(u32, objt_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(i32, entry.sprite);
+                    write_bool!(entry.visible);
+                    write_bool!(entry.solid);
+                    write_value!(i32, entry.depth);
+                    write_bool!(entry.persistent);
+                    write_value!(i32, entry.parent);
+                    write_value!(i32, entry.texture_mask_id);
+                    write_bool!(entry.uses_physics);
+                    write_bool!(entry.is_sensor);
+                    write_value!(u32, entry.collision_shape);
+                    write_value!(f32, entry.density);
+                    write_value!(f32, entry.restitution);
+                    write_value!(u32, entry.group);
+                    write_value!(f32, entry.linear_dampling);
+                    write_value!(f32, entry.angular_dampling);
+                    write_value!(u32, entry.physics_shape_vertices.len());
+                    write_value!(f32, entry.friction);
+                    write_bool!(entry.awake);
+                    write_bool!(entry.kinematic);
+                    for vertex in entry.physics_shape_vertices.iter() {
+                        write_value!(f32, vertex.x);
+                        write_value!(f32, vertex.y);
+                    }
+                    let mut event_ptr = Vec::new();
+                    for _ in 0..entry.events.len() {
+                        event_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, event) in entry.events.iter().enumerate() {
+                        poke_value!(u32, event_ptr[index], data.len());
+
+                        let mut subevent_ptr = Vec::new();
+                        write_value!(u32, event.len());
+                        for _ in 0..event.len() {
+                            subevent_ptr.push(data.len());
+                            write_value!(u32, 0x00_00_00_00);
+                        }
+                        for (index, subevent) in event.iter().enumerate() {
+                            poke_value!(u32, subevent_ptr[index], data.len());
+
+                            write_value!(u32, subevent.event_subtype);
+                            let mut action_ptr = Vec::new();
+                            for _ in 0..subevent.event_action.len() {
+                                action_ptr.push(data.len());
+                                write_value!(u32, 0x00_00_00_00);
+                            }
+                            for (index, action) in subevent.event_action.iter().enumerate() {
+                                poke_value!(u32, action_ptr[index], data.len());
+
+                                write_value!(u32, action.lib_id);
+                                write_value!(u32, action.id);
+                                write_value!(u32, action.kind);
+                                write_bool!(action.use_relative);
+                                write_bool!(action.is_question);
+                                write_bool!(action.use_apply_to);
+                                write_value!(u32, action.exe_type);
+                                point_string!(action.action_name);
+                                write_value!(u32, action.code_id);
+                                write_value!(u32, action.argument_count);
+                                write_value!(i32, action.who);
+                                write_bool!(action.relative);
+                                write_bool!(action.is_not);
+                                write_value!(u32, action.unknown1);
+                            }
+                        }
+                    }
+                }
+            
+                info!("OBJT OK!");
+            }
+
+            show_offset!();
+            // ROOM Chunk
+
+            {
+                write_chunk!("ROOM");
+                let mut room_ptr = Vec::new();
+                write_value!(u32, room.data.len());
+                for _ in 0..room.data.len() {
+                    room_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in room.data.iter().enumerate() {
+                    poke_value!(u32, room_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    point_string!(entry.caption);
+                    write_value!(u32, entry.width);
+                    write_value!(u32, entry.height);
+                    write_value!(u32, entry.speed);
+                    write_bool!(entry.persistent);
+                    write_value!(u32, entry.background_color);
+                    write_bool!(entry.draw_background_color);
+                    write_value!(u32, entry.creation_code_id);
+                    write_value!(u32, entry.flags);
+                    let background_ptr = data.len();
+                    write_value!(u32, 0x00_00_00_00);
+                    let view_ptr = data.len();
+                    write_value!(u32, 0x00_00_00_00);
+                    let objects_ptr = data.len();
+                    write_value!(u32, 0x00_00_00_00);
+                    let tiles_ptr = data.len();
+                    write_value!(u32, 0x00_00_00_00);
+                    write_bool!(entry.world);
+                    write_value!(u32, entry.top);
+                    write_value!(u32, entry.left);
+                    write_value!(u32, entry.right);
+                    write_value!(u32, entry.bottom);
+                    write_value!(f32, entry.gravity_x);
+                    write_value!(f32, entry.gravity_y);
+                    write_value!(f32, entry.meters_per_pixel);
+
+                    poke_value!(u32, background_ptr, data.len());
+                    let mut background_ptr = Vec::new();
+                    for _ in 0..entry.backgrounds.len() {
+                        background_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, entry) in entry.backgrounds.iter().enumerate() {
+                        poke_value!(u32, background_ptr[index], data.len());
+
+                        write_bool!(entry.enabled);
+                        write_bool!(entry.foreground);
+                        write_value!(i32, entry.definition);
+                        write_value!(i32, entry.x);
+                        write_value!(i32, entry.y);
+                        write_value!(i32, entry.tile_x);
+                        write_value!(i32, entry.tile_y);
+                        write_value!(i32, entry.speed_x);
+                        write_value!(i32, entry.speed_y);
+                        write_bool!(entry.stretch);
+                    }
+                    poke_value!(u32, view_ptr, data.len());
+                    let mut view_ptr = Vec::new();
+                    for _ in 0..entry.views.len() {
+                        view_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, entry) in entry.views.iter().enumerate() {
+                        poke_value!(u32, view_ptr[index], data.len());
+
+                        write_bool!(entry.enabled);
+                        write_value!(i32, entry.view_x);
+                        write_value!(i32, entry.view_y);
+                        write_value!(i32, entry.view_width);
+                        write_value!(i32, entry.view_height);
+                        write_value!(i32, entry.port_x);
+                        write_value!(i32, entry.port_y);
+                        write_value!(i32, entry.port_width);
+                        write_value!(i32, entry.port_height);
+                        write_value!(u32, entry.border_x);
+                        write_value!(u32, entry.border_y);
+                        write_value!(i32, entry.speed_x);
+                        write_value!(i32, entry.speed_y);
+                        write_value!(i32, entry.object_id);
+                    }
+                    poke_value!(u32, objects_ptr, data.len());
+                    let mut objects_ptr = Vec::new();
+                    for _ in 0..entry.game_objects.len() {
+                        objects_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, entry) in entry.game_objects.iter().enumerate() {
+                        poke_value!(u32, objects_ptr[index], data.len());
+
+                        write_value!(i32, entry.x);
+                        write_value!(i32, entry.y);
+                        write_value!(i32, entry.object_id);
+                        write_value!(u32, entry.instance_id);
+                        write_value!(i32, entry.creation_code);
+                        write_value!(f32, entry.scale_x);
+                        write_value!(f32, entry.scale_y);
+                        write_value!(u32, entry.color);
+                        write_value!(f32, entry.angle);
+                        write_value!(i32, entry.pre_creation_code);
+                    }
+                    poke_value!(u32, tiles_ptr, data.len());
+                    let mut tiles_ptr = Vec::new();
+                    for _ in 0..entry.tiles.len() {
+                        tiles_ptr.push(data.len());
+                        write_value!(u32, 0x00_00_00_00);
+                    }
+                    for (index, entry) in entry.tiles.iter().enumerate() {
+                        poke_value!(u32, tiles_ptr[index], data.len());
+
+                        write_value!(i32, entry.x);
+                        write_value!(i32, entry.y);
+                        write_value!(i32, entry.background_id);
+                        write_value!(u32, entry.source_x);
+                        write_value!(u32, entry.source_y);
+                        write_value!(u32, entry.width);
+                        write_value!(u32, entry.height);
+                        write_value!(i32, entry.tile_depth);
+                        write_value!(u32, entry.instance_id);
+                        write_value!(f32, entry.scale_x);
+                        write_value!(f32, entry.scale_y);
+                        write_value!(u32, entry.color);
+                    }
+                }
+
+                info!("ROOM OK!");
+            }
+
+            show_offset!();
+            // DAFL Chunk
+
+            {
+                write_chunk!("DAFL");
+
+                info!("DAFL OK!");
+            }
+
+            show_offset!();
+            // TPAG Chunk
+
+            {
+                write_chunk!("TPAG");
+                let mut tpag_ptr = Vec::new();
+                write_value!(u32, tpag.data.len());
+                for _ in 0..tpag.data.len() {
+                    tpag_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in tpag.data.iter().enumerate() {
+                    poke_value!(u32, tpag_ptr[index], data.len());
+
+                    write_value!(u16, entry.source_x);
+                    write_value!(u16, entry.source_y);
+                    write_value!(u16, entry.source_width);
+                    write_value!(u16, entry.source_height);
+                    write_value!(u16, entry.target_x);
+                    write_value!(u16, entry.target_y);
+                    write_value!(u16, entry.target_width);
+                    write_value!(u16, entry.target_height);
+                    write_value!(u16, entry.bounding_width);
+                    write_value!(u16, entry.bounding_height);
+                    write_value!(i16, entry.texture_id);
+                }
+
+                info!("TPAG OK!");
+            }
+
+            show_offset!();
+            // CODE Chunk
+
+            {
+                write_chunk!("CODE");
+                let mut code_ptr = Vec::new();
+                for _ in 0..code.data.len() {
+                    code_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                let mut code_offset = Vec::new();
+                for entry in code.data.iter() {
+                    code_offset.push(data.len());
+                    data.extend(&entry.code);
+                }
+                for (index, entry) in code.data.iter().enumerate() {
+                    poke_value!(u32, code_ptr[index], data.len());
+
+                    point_string!(entry.name);
+                    write_value!(u32, entry.length);
+                    write_value!(u16, entry.locals_count);
+                    write_value!(u16, entry.arguments_count);
+                    write_value!(i32, (code_offset[index] as i32) - (data.len() as i32));
+                    write_value!(u32, entry.offset);
+                }
+
+                info!("CODE OK!");
+            }
+
+            show_offset!();
+            // VARI Chunk
+
+            {
+                write_chunk!("VARI");
+
+                info!("VARI OK!");
+            }
 
             // Finalize serializing
 
             {
                 info!("Preparing to finalize serializing...");
+
+                let mut warnings = 0u64;
 
                 string_pointers.iter()
                     .for_each(|(text, (pointer, values))| {
@@ -1515,10 +2328,22 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                                 });
                         }else{
                             warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
+                            warnings += 1;
                         }
                     });
                 
-                info!("Finalized serializing.");
+                info!("Calculating chunk size...");
+                
+                for i in 1..chunk_offsets.len() { // Ignore FORM Chunk
+                    if i + 1 < chunk_offsets.len() {
+                        poke_value!(u32, chunk_offsets[i] + 4, chunk_offsets[i + 1] - chunk_offsets[i] - 8);
+                    }else{
+                        poke_value!(u32, chunk_offsets[i] + 4, data.len() - chunk_offsets[i] - 8);
+                    }
+                }
+                poke_value!(u32, chunk_offsets[0] + 4, data.len() - 8);
+                
+                info!("Finalized serializing with {} warnings.", warnings);
             }
             
             // Save data.win
@@ -1544,7 +2369,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     }
                 }
                 
-                info!("Saved data.win with size of {} {}",
+                info!("Saved data.win with a size of {} {}",
                     if size.floor() != size {
                         format!("{:.2}", size)
                     }else{
