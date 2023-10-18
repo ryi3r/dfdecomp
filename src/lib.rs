@@ -692,7 +692,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     gen8.room_order[i] = read_u32!();
                 }
 
-                //info!("{:?}", gen8);
                 info!("GEN8 OK!");
             }
 
@@ -721,7 +720,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     optn.constants.insert(name, value);
                 }
 
-                //info!("{:?}", optn);
                 info!("OPTN OK!");
             }
 
@@ -734,7 +732,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 lang.language_count = read_u32!();
                 lang.entry_count = read_u32!(); // Very vague implementation... should work as it's unused.
 
-                //info!("{:?}", lang);
                 info!("LANG OK!");
             }
 
@@ -806,7 +803,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     extn.product_id_data.push(read_bytes!(16));
                 }
 
-                //info!("{:?}", extn);
                 info!("EXTN OK!");
             }
             
@@ -838,7 +834,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     sond.data.push(entry);
                 }
 
-                //info!("{:?}", sond);
                 info!("SOND OK!");
             }
 
@@ -857,7 +852,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     argp.names.push(read_string!());
                 }
 
-                //info!("{:?}", argp);
                 info!("ARGP OK!");
             }
 
@@ -910,7 +904,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     sprt.data.push(entry);
                 }
 
-                //info!("{:?}", sprt);
                 info!("SPRT OK!");
             }
 
@@ -939,7 +932,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     bgnd.data.push(entry);
                 }
 
-                //info!("{:?}", bgnd);
                 info!("BGND OK!");
             }
 
@@ -978,7 +970,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     path.data.push(entry);
                 }
 
-                //info!("{:?}", path);
                 info!("PATH OK!");
             }
 
@@ -1003,6 +994,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
                     scpt.data.push(entry);
                 }
+
+                info!("SCPT OK!");
             }
 
             show_offset!();
@@ -1014,7 +1007,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     glob.items.push(read_u32!());
                 }
 
-                //info!("{:?}", glob);
                 info!("GLOB OK!");
             }
 
@@ -1059,7 +1051,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     shdr.data.push(entry);
                 }
 
-                //info!("{:?}", shdr);
                 info!("SHDR OK!");
             }
 
@@ -1124,7 +1115,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
                 font.buffer = read_bytes_vec!(512);
 
-                //info!("{:?}", font);
                 info!("FONT OK!");
             }
 
@@ -1139,6 +1129,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     error!("There's {} timelines, while expecting 0 timelines.", timeline_amount);
                     return Ok(());
                 }
+
+                info!("TMLN OK!");
             }
 
             show_offset!();
@@ -1244,7 +1236,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     objt.data.push(entry);
                 }
 
-                //info!("{:?}", objt);
                 info!("OBJT OK!");
             }
 
@@ -1392,7 +1383,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     room.data.push(entry);
                 }
 
-                //info!("{:?}", room);
                 info!("ROOM OK!");
             }
 
@@ -1427,7 +1417,6 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 // chunk (offsets to the next chunk)
                 data.seek(SeekFrom::Current(24)).unwrap();
 
-                //info!("{:?}", tpag);
                 info!("TPAG OK!");
             }
 
@@ -1462,8 +1451,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
             }
 
-            show_offset!();
             info!("Finished unserializing.");
+            show_offset!();
         }
 
         // Temmie Flakes serializer
