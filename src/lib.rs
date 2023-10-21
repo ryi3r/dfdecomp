@@ -645,6 +645,16 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             name: String
         }
 
+        #[derive(Default, Debug)]
+        struct StrgChunk {
+            strings: Vec<StrgData>
+        }
+        #[derive(Default, Debug)]
+        struct StrgData {
+            string: String,
+            length: u32
+        }
+
         let mut form = FormChunk { ..Default::default() };
         let mut gen8 = Gen8Chunk { ..Default::default() };
         let mut optn = OptnChunk { ..Default::default() };
@@ -666,6 +676,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let mut code = CodeChunk { ..Default::default() };
         let mut vari = VariChunk { ..Default::default() };
         let mut func = FuncChunk { ..Default::default() };
+        let mut strg = StrgChunk { ..Default::default() };
 
         // Unserializer
 
@@ -1598,6 +1609,39 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("FUNC OK!");
             }
 
+            show_offset!();
+            // STRG Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+
+                let mut strg_ptr = Vec::new();
+                let _size = read_u32!();
+                let mut ptr = read_u32!();
+                while ptr >= 0xffff {
+                    strg_ptr.push(ptr);
+                    ptr = read_u32!();
+                }
+                data.seek(SeekFrom::Current(-4)).unwrap();
+                for ptr in strg_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = StrgData {
+                        ..Default::default()
+                    };
+                    entry.length = read_u32!();
+                    let mut string = Vec::new();
+                    let mut buffer = data.read_u8().unwrap();
+                    while buffer != 0 {
+                        string.push(buffer);
+                        buffer = data.read_u8().unwrap();
+                    }
+                    entry.string = String::from_utf8_lossy(&string).to_string();
+                    strg.strings.push(entry);
+                }
+
+                info!("STRG OK!");
+            }
+
             //
 
             show_offset!();
@@ -2487,20 +2531,39 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 info!("FUNC OK!");
             }
 
+            show_offset!();
+            // STRG Chunk
+
+            {
+                write_chunk!("STRG");
+
+                let mut strg_ptr = Vec::new();
+                for _ in 0..strg.strings.len() {
+                    strg_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in strg.strings.iter().enumerate() {
+                    poke_value!(u32, strg_ptr[index], data.len());
+                    write_string!(entry.string);
+                }
+
+                info!("STRG OK!");
+            }
+
             // Finalize serializing
 
             {
                 info!("Preparing to finalize serializing...");
 
                 string_pointers.iter()
-                    .for_each(|(_text, (pointer, values))| {
+                    .for_each(|(text, (pointer, values))| {
                         if let Some(pointer) = *pointer {
                             values.iter()
                                 .for_each(|value| {
                                     poke_value!(u32, *value, pointer);
                                 });
                         }else{
-                            //warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
+                            warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
                             warnings += 1;
                         }
                     });
