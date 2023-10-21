@@ -1568,10 +1568,13 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     };
 
                     entry.name = read_string!();
+                    let _occurrences = read_u32!();
+                    let _addr = read_u32!();
 
                     func.functions.push(entry);
                 }
-                for _ in 0..read_u32!() {
+                let amount = read_u32!();
+                for _ in 0..amount {
                     let mut entry = FuncDataLocals {
                         ..Default::default()
                     };
