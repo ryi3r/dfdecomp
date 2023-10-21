@@ -641,7 +641,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         }
         #[derive(Default, Debug)]
         struct FuncLocalVars {
-
+            index: u32,
+            name: String
         }
 
         let mut form = FormChunk { ..Default::default() };
@@ -664,6 +665,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let mut tpag = TpagChunk { ..Default::default() };
         let mut code = CodeChunk { ..Default::default() };
         let mut vari = VariChunk { ..Default::default() };
+        let mut func = FuncChunk { ..Default::default() };
 
         // Unserializer
 
@@ -679,10 +681,12 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             info!("Start unserializing...");
             // Start reading the data...
 
+            /*
             let mut file = BufWriter::new(File::create("dump").unwrap());
             file.write_all(data.clone().into_inner()).unwrap();
             file.flush().unwrap();
             drop(file);
+            */
 
             // FORM Chunk
 
@@ -1508,7 +1512,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
                 vari.max_localvar_count = read_u32!();
                 let offset = data.position();
-                for current_entry in 0..(variable_count1.min(variable_count2) as f64 * 2.71493664900648) as u32 {
+                for current_entry in 0..variable_count1.min(variable_count2) * 2 {
                     data.seek(SeekFrom::Start(offset + ((current_entry as u64) * 20))).unwrap();
                     let mut entry = VariData {
                         ..Default::default()
@@ -1531,6 +1535,24 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     vari.data.push(entry);
                 }
 
+                // I still need to figure out the size, so
+                // this is a placeholder.
+
+                while data.position() % 8 != 0 { // 16144792 % 8 = 0
+                    read_u8!();
+                }
+                while read_u32!() != 0x444e4f53 {
+                    // 444e4f53 = SOND (FUNC Chunk)
+
+                    // This is limited to DF 2.7.7
+                    // since on every version the
+                    // chunk names change.
+                }
+
+                // Go before the chunk name so the next chunk
+                // can skip properly.
+                data.seek(SeekFrom::Current(-4)).unwrap();
+
                 info!("VARI OK!");
             }
 
@@ -1539,6 +1561,36 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
             {
                 data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+
+                for _ in 0..read_u32!() {
+                    let mut entry = FuncFunction {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+
+                    func.functions.push(entry);
+                }
+                for _ in 0..read_u32!() {
+                    let mut entry = FuncDataLocals {
+                        ..Default::default()
+                    };
+
+                    let count = read_u32!();
+                    entry.name = read_string!();
+                    for _ in 0..count {
+                        let mut var = FuncLocalVars {
+                            ..Default::default()
+                        };
+
+                        var.index = read_u32!();
+                        var.name = read_string!();
+
+                        entry.local_vars.push(var);
+                    }
+
+                    func.data_locals.push(entry);
+                }
 
                 info!("FUNC OK!");
             }
@@ -2412,6 +2464,22 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
             {
                 write_chunk!("FUNC");
+
+                write_value!(u32, func.functions.len());
+                for func in func.functions.iter() {
+                    point_string!(func.name);
+                    write_value!(u32, 0);
+                    write_value!(i32, -1);
+                }
+                write_value!(u32, func.data_locals.len());
+                for data_local in func.data_locals.iter() {
+                    write_value!(u32, data_local.local_vars.len());
+                    point_string!(data_local.name);
+                    for var in data_local.local_vars.iter() {
+                        write_value!(u32, var.index);
+                        point_string!(var.name);
+                    }
+                }
 
                 info!("FUNC OK!");
             }
