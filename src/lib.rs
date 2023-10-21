@@ -34,6 +34,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
     // 0x47a4d1, 0x47b2ad, 0x83dd7c, 0x83e00c and 0x83e098
     // I'll use the first one for now.
 
+    // UPDATE: On DFC 2.7.7, the 1st pointer still works.
+
     // How do find the pointer:
     // 0xa4e5e0 contains the Game ID, we need to search
     // all u32 addresses pointing to 0xa4e5e0, the 2nd
@@ -49,6 +51,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let data_pointer = *(0x47a4d1 as *mut u32) as *mut u32;
         let data_length = *data_pointer.offset(1) as usize;
         let mut data = Cursor::new(slice::from_raw_parts(data_pointer.addr() as *mut u8, data_length));
+
+        let mut warnings = 0u64;
 
         macro_rules! read_string {
             () => {
@@ -608,6 +612,38 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             offset: u32
         }
 
+        #[derive(Default, Debug)]
+        struct VariChunk {
+            data: Vec<VariData>,
+            max_localvar_count: u32
+        }
+        #[derive(Default, Debug)]
+        struct VariData {
+            name: String,
+            instance_kind: i32,
+            variable_id: u32,
+            _references: Vec<usize>
+        }
+
+        #[derive(Default, Debug)]
+        struct FuncChunk {
+            functions: Vec<FuncFunction>,
+            data_locals: Vec<FuncDataLocals>
+        }
+        #[derive(Default, Debug)]
+        struct FuncFunction {
+            name: String,
+        }
+        #[derive(Default, Debug)]
+        struct FuncDataLocals {
+            name: String,
+            local_vars: Vec<FuncLocalVars>
+        }
+        #[derive(Default, Debug)]
+        struct FuncLocalVars {
+
+        }
+
         let mut form = FormChunk { ..Default::default() };
         let mut gen8 = Gen8Chunk { ..Default::default() };
         let mut optn = OptnChunk { ..Default::default() };
@@ -627,6 +663,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let mut room = RoomChunk { ..Default::default() };
         let mut tpag = TpagChunk { ..Default::default() };
         let mut code = CodeChunk { ..Default::default() };
+        let mut vari = VariChunk { ..Default::default() };
 
         // Unserializer
 
@@ -1399,23 +1436,28 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             // TPAG Chunk
 
             {
+                // This chunk appears to be the TPAG Chunk
+                // but I can't figure out how to get data
+                // from it just yet, I only know it looks
+                // like the TPAG because of the number of
+                // entries, but that's all the hints I
+                // have, it's probably encoded or XORed,
+                // which is probably why I can't figure it
+                // out just yet lol.
+
                 data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
-                let mut tpag_ptr = Vec::new();
-                for _ in 0..read_u32!() {
-                    tpag_ptr.push(read_u32!());
-                }
-                for ptr in tpag_ptr {
-                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                let temp = read_u32!();
+                for _ in 0..temp {
                     let entry = TpagData {
                         ..Default::default()
                     };
 
                     tpag.data.push(entry);
                 }
-
-                // Use this until I figure out how to read the
-                // chunk (offsets to the next chunk)
-                data.seek(SeekFrom::Current(24)).unwrap();
+                data.seek(SeekFrom::Current(((temp as i64) - 1) * 4)).unwrap();
+                let temp = read_u32!();
+                data.seek(SeekFrom::Start(temp as u64)).unwrap();
+                data.seek(SeekFrom::Current(22)).unwrap();
 
                 info!("TPAG OK!");
             }
@@ -1449,10 +1491,62 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
                     code.data.push(entry);
                 }
+
+                info!("CODE OK!");
             }
 
-            info!("Finished unserializing.");
             show_offset!();
+            // VARI Chunk
+            
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+                let variable_count1 = read_u32!();
+                let variable_count2 = read_u32!();
+                if variable_count1 != variable_count2 {
+                    warn!("{} doesn't match {}", variable_count1, variable_count2);
+                    warnings += 1;
+                }
+                vari.max_localvar_count = read_u32!();
+                let offset = data.position();
+                for current_entry in 0..(variable_count1.min(variable_count2) as f64 * 2.71493664900648) as u32 {
+                    data.seek(SeekFrom::Start(offset + ((current_entry as u64) * 20))).unwrap();
+                    let mut entry = VariData {
+                        ..Default::default()
+                    };
+
+                    entry.name = read_string!();
+                    entry.instance_kind = read_i32!();
+                    entry.variable_id = read_u32!();
+                    let occurrences = read_i32!();
+                    let addr = read_i32!();
+                    if occurrences > 0 {
+                        //warn!("Found {occurrences} while was expecting 0 on address {}, while pointing to the address {addr}", data.position());
+                        warnings += 1;
+                    }
+                    if addr != -1 {
+                        //warn!("Expected -1 but found {addr} as the first occurrence on address {}", data.position());
+                        warnings += 1;
+                    }
+
+                    vari.data.push(entry);
+                }
+
+                info!("VARI OK!");
+            }
+
+            show_offset!();
+            // FUNC Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+
+                info!("FUNC OK!");
+            }
+
+            //
+
+            show_offset!();
+            info!("Finished unserializing.");
         }
 
         // Temmie Flakes serializer
@@ -2298,7 +2392,28 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             {
                 write_chunk!("VARI");
 
+                write_value!(u32, vari.data.len());
+                write_value!(u32, vari.data.len());
+                write_value!(u32, vari.max_localvar_count);
+
+                for entry in vari.data.iter() {
+                    point_string!(entry.name);
+                    write_value!(i32, entry.instance_kind);
+                    write_value!(u32, entry.variable_id);
+                    write_value!(u32, 0);
+                    write_value!(i32, -1);
+                }
+
                 info!("VARI OK!");
+            }
+
+            show_offset!();
+            // FUNC Chunk
+
+            {
+                write_chunk!("FUNC");
+
+                info!("FUNC OK!");
             }
 
             // Finalize serializing
@@ -2306,17 +2421,15 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             {
                 info!("Preparing to finalize serializing...");
 
-                let mut warnings = 0u64;
-
                 string_pointers.iter()
-                    .for_each(|(text, (pointer, values))| {
+                    .for_each(|(_text, (pointer, values))| {
                         if let Some(pointer) = *pointer {
                             values.iter()
                                 .for_each(|value| {
                                     poke_value!(u32, *value, pointer);
                                 });
                         }else{
-                            warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
+                            //warn!("{:?} was never given a pointer, while it was being used on offsets: {:?}.", text, values);
                             warnings += 1;
                         }
                     });
