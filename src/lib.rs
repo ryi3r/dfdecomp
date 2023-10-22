@@ -49,7 +49,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         // wrong pointer, meaning a complete data loss.
 
         let data_pointer = *(0x47a4d1 as *mut u32) as *mut u32;
-        let data_length = *data_pointer.offset(1) as usize;
+        let data_length = *data_pointer.offset(1) as usize + 0xffff;
+        // Add 0xffff extra data so it doesn't offset too much.
         let mut data = Cursor::new(slice::from_raw_parts(data_pointer.addr() as *mut u8, data_length));
 
         let mut warnings = 0u64;
@@ -655,6 +656,25 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
             length: u32
         }
 
+        #[derive(Default, Debug)]
+        struct TxtrChunk {
+            data: Vec<TxtrData>
+        }
+        #[derive(Default, Debug)]
+        struct TxtrData {
+            length: u32,
+            data: Vec<u8>
+        }
+
+        #[derive(Default, Debug)]
+        struct AudoChunk {
+            data: Vec<AudoData>
+        }
+        #[derive(Default, Debug)]
+        struct AudoData {
+            data: Vec<u8>
+        }
+
         let mut form = FormChunk { ..Default::default() };
         let mut gen8 = Gen8Chunk { ..Default::default() };
         let mut optn = OptnChunk { ..Default::default() };
@@ -677,6 +697,8 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
         let mut vari = VariChunk { ..Default::default() };
         let mut func = FuncChunk { ..Default::default() };
         let mut strg = StrgChunk { ..Default::default() };
+        let mut txtr = TxtrChunk { ..Default::default() };
+        let mut audo = AudoChunk { ..Default::default() };
 
         // Unserializer
 
@@ -1535,11 +1557,11 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     let occurrences = read_i32!();
                     let addr = read_i32!();
                     if occurrences > 0 {
-                        //warn!("Found {occurrences} while was expecting 0 on address {}, while pointing to the address {addr}", data.position());
+                        warn!("Found {occurrences} while was expecting 0 on address {}, while pointing to the address {addr}", data.position());
                         warnings += 1;
                     }
                     if addr != -1 {
-                        //warn!("Expected -1 but found {addr} as the first occurrence on address {}", data.position());
+                        warn!("Expected -1 but found {addr} as the first occurrence on address {}", data.position());
                         warnings += 1;
                     }
 
@@ -1639,7 +1661,82 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                     strg.strings.push(entry);
                 }
 
+                let mut buffer = read_u8!();
+                while buffer == 0 {
+                    buffer = read_u8!();
+                }
+                data.seek(SeekFrom::Current(-1)).unwrap();
+
                 info!("STRG OK!");
+            }
+
+            show_offset!();
+            // TXTR Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+
+                let mut txtr_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    txtr_ptr.push(read_u32!());
+                }
+                for ptr in txtr_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = TxtrData {
+                        ..Default::default()
+                    };
+
+                    entry.length = read_u32!();
+                    let ptr = read_u32!();
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let current = data.position();
+                    loop {
+                        let d = read_bytes!(4);
+                        data.seek(SeekFrom::Current(-3)).unwrap();
+                        if &d == b"IEND" {
+                            data.seek(SeekFrom::Current(10)).unwrap();
+                            let end = data.position();
+                            data.seek(SeekFrom::Start(current)).unwrap();
+                            entry.data = read_bytes_vec!((end - current) as usize);
+
+                            break;
+                        }
+                    }
+
+                    txtr.data.push(entry);
+                }
+
+                info!("TXTR OK!");
+            }
+
+            show_offset!();
+            // AUDO Chunk
+
+            {
+                data.seek(SeekFrom::Current(8)).unwrap(); // Ignore chunk name and size
+
+                let mut audo_ptr = Vec::new();
+                for _ in 0..read_u32!() {
+                    audo_ptr.push(read_u32!());
+                }
+                for ptr in audo_ptr {
+                    data.seek(SeekFrom::Start(ptr as u64)).unwrap();
+                    let mut entry = AudoData {
+                        ..Default::default()
+                    };
+
+                    let mut length = read_u32!();
+                    if length > data_length as u32 - (data.position() as u32) {
+                        warn!("{length} surpases the EOF!!! reajusting to fit to the file.");
+                        warnings += 1;
+                        length = data_length as u32 - (data.position() as u32);
+                    }
+                    entry.data = read_bytes_vec!(length as usize);
+
+                    audo.data.push(entry);
+                }
+
+                info!("AUDO OK!");
             }
 
             //
@@ -1795,7 +1892,7 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
 
             {
                 write_chunk!("GEN8");
-                write_bool!(gen8.is_debugged_disabled);
+                write_value!(u8, gen8.is_debugged_disabled as u8);
                 write_value!(u8, gen8.bytecode_version);
                 write_value!(u16, gen8.unknown1);
                 point_string!(gen8.filename);
@@ -2548,6 +2645,54 @@ unsafe fn do_fallible_stuff() -> color_eyre::Result<()> {
                 }
 
                 info!("STRG OK!");
+            }
+
+            show_offset!();
+            // TXTR Chunk
+
+            {
+                write_chunk!("TXTR");
+
+                let mut txtr_ptr = Vec::new();
+                write_value!(u32, txtr.data.len());
+                for _ in 0..txtr.data.len() {
+                    txtr_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                let mut txtr_ptr2 = Vec::new();
+                for (index, entry) in txtr.data.iter().enumerate() {
+                    poke_value!(u32, txtr_ptr[index], data.len());
+
+                    write_value!(u32, entry.length);
+                    txtr_ptr2.push(data.len());
+                }
+                for (index, entry) in txtr.data.iter().enumerate() {
+                    poke_value!(u32, txtr_ptr2[index], data.len());
+                    write_bytes!(&entry.data);
+                }
+
+                info!("TXTR OK!");
+            }
+
+            show_offset!();
+            // AUDO Chunk
+            
+            {
+                write_chunk!("AUDO");
+
+                let mut audo_ptr = Vec::new();
+                for _ in 0..audo.data.len() {
+                    audo_ptr.push(data.len());
+                    write_value!(u32, 0x00_00_00_00);
+                }
+                for (index, entry) in audo.data.iter().enumerate() {
+                    poke_value!(u32, audo_ptr[index], data.len());
+
+                    write_value!(u32, entry.data.len());
+                    write_bytes!(&entry.data);
+                }
+
+                info!("AUDO OK!");
             }
 
             // Finalize serializing
