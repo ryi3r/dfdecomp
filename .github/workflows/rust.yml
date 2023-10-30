@@ -12,12 +12,11 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v3
     - name: Build
       run: |
         rustup default nightly
-        rustup target add x86_64-pc-windows-gnu
-        cargo build --target=x86_64-pc-windows-gnu --verbose
+        cargo build --target=x86_64-pc-windows-msvc
